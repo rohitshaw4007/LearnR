@@ -26,14 +26,14 @@ export const viewport = {
 
 // 2. Complete SEO + PWA Metadata
 export const metadata = {
-  metadataBase: new URL('https://learn-r-five.vercel.app'), // Apni Domain yahan update karein
+  metadataBase: new URL('https://learn-r-eight.vercel.app'), // Apni Domain yahan update karein
   title: {
     default: 'LearnR - Best Online Coaching & E-Learning Platform',
     template: '%s | LearnR'
   },
   description: 'Join LearnR to access top-quality courses, live classes, and study materials. The best platform for students and teachers to connect and grow.',
   keywords: ['LearnR', 'Online Coaching', 'E-learning', 'Education Platform', 'Live Classes', 'Student Portal', 'English Learning'],
-  authors: [{ name: 'LearnR Team', url: 'https://learn-r-five.vercel.app' }],
+  authors: [{ name: 'LearnR Team', url: 'https://learn-r-eight.vercel.app' }],
   creator: 'LearnR',
   publisher: 'LearnR',
   
@@ -49,7 +49,7 @@ export const metadata = {
   openGraph: {
     title: 'LearnR - Transform Your Learning Experience',
     description: 'Experience the future of education with LearnR. Live classes, tests, and comprehensive study materials.',
-    url: 'https://learn-r-five.vercel.app',
+    url: 'https://learn-r-eight.vercel.app',
     siteName: 'LearnR',
     images: [
       {
