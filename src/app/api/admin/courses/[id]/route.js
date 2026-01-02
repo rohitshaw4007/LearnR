@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Course from "@/models/Course";
 import User from "@/models/User";
-import Enrollment from "@/models/Enrollment"; // Enrollment model import kiya
+import Enrollment from "@/models/Enrollment"; 
 
 export const dynamic = 'force-dynamic';
 
@@ -17,13 +17,16 @@ export async function GET(req, { params }) {
             return NextResponse.json({ error: "Course not found" }, { status: 404 });
         }
 
-        // 1. Asli Enrollment Count pata karein
-        const realStudentCount = await Enrollment.countDocuments({ course: id });
+        // FIX: Sirf 'approved' status wale students count karein
+        const realStudentCount = await Enrollment.countDocuments({ 
+            course: id, 
+            status: "approved" 
+        });
 
-        // 2. Agar database ka count galat hai, to usse fix karein
+        // Agar count mismatch hai to update karein
         if (course.students !== realStudentCount) {
              await Course.findByIdAndUpdate(id, { students: realStudentCount });
-             course.students = realStudentCount; // Response me bhi update karein
+             course.students = realStudentCount; 
         }
 
         return NextResponse.json(course);
@@ -42,13 +45,10 @@ export async function PUT(req, { params }) {
 
     const updatedCourse = await Course.findByIdAndUpdate(id, body, { new: true });
 
-    if (!updatedCourse) {
-      return NextResponse.json({ error: "Course not found" }, { status: 404 });
-    }
+    if (!updatedCourse) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     return NextResponse.json({ message: "Course Updated", course: updatedCourse });
   } catch (error) {
-    console.error("Update Error:", error);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
@@ -59,25 +59,15 @@ export async function DELETE(req, { params }) {
     await connectDB();
     const { id } = await params;
 
-    // 1. Delete the Course
     const deletedCourse = await Course.findByIdAndDelete(id);
+    if (!deletedCourse) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    if (!deletedCourse) {
-      return NextResponse.json({ error: "Course not found" }, { status: 404 });
-    }
-
-    // 2. Cleanup: Remove this course ID from all Users
-    await User.updateMany(
-      { courses: id },
-      { $pull: { courses: id } }
-    );
-    
-    // 3. Cleanup: Delete all Enrollments for this course
+    // Cleanup
+    await User.updateMany({ courses: id }, { $pull: { courses: id } });
     await Enrollment.deleteMany({ course: id });
 
-    return NextResponse.json({ message: "Course Deleted & Data Cleaned" });
+    return NextResponse.json({ message: "Deleted" });
   } catch (error) {
-    console.error("Delete Error:", error);
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

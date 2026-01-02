@@ -45,6 +45,43 @@ export default function CourseDetails({ course }) {
     checkStatus();
   }, [user, course]);
 
+  // --- FREE ENROLLMENT HANDLER (NEW FIX) ---
+  const handleFreeEnrollment = async () => {
+    if (!user) {
+      alert("Please login to enroll!");
+      router.push("/login");
+      return;
+    }
+    
+    // Confirmation
+    if (!confirm("Are you sure you want to enroll in this free course?")) return;
+
+    setPaymentLoading(true);
+
+    try {
+      const res = await fetch("/api/enroll/free", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId: course._id }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        alert(data.message || "Success! Enrollment request sent to Admin. Please check your email.");
+        // Request Pending hai, isliye turant dashboard redirect nahi kar rahe
+      } else {
+        // Fix: Show specific error from backend
+        alert(data.error || "Enrollment failed. Please try again.");
+      }
+    } catch (error) {
+      console.error("Free Enrollment Error:", error);
+      alert("Something went wrong. Please check your connection.");
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
   // --- PREMIUM RAZORPAY HANDLER ---
   const handlePayment = async () => {
     if (!user) {
@@ -431,8 +468,12 @@ export default function CourseDetails({ course }) {
 
                         <h3 className="text-gray-400 text-xs md:text-sm font-medium mb-1">Monthly Subscription</h3>
                         <div className="flex items-baseline gap-1 mb-5 md:mb-6">
-                            <span className="text-3xl md:text-4xl font-black text-white">₹{course.price}</span>
-                            <span className="text-gray-500 text-xs md:text-sm font-medium">/ month</span>
+                            <span className="text-3xl md:text-4xl font-black text-white">
+                                {course.price === 0 ? "FREE" : `₹${course.price}`}
+                            </span>
+                            <span className="text-gray-500 text-xs md:text-sm font-medium">
+                                {course.price === 0 ? "" : "/ month"}
+                            </span>
                         </div>
 
                         {/* --- SMART BUTTON LOGIC --- */}
@@ -447,16 +488,31 @@ export default function CourseDetails({ course }) {
                                 </span>
                             </button>
                         ) : (
-                            <button 
-                                onClick={() => setShowPaymentModal(true)}
-                                className="group relative w-full overflow-hidden rounded-xl bg-yellow-500 p-3 md:p-4 transition-all hover:bg-yellow-400 active:scale-[0.98] shadow-[0_0_20px_rgba(234,179,8,0.3)] hover:shadow-[0_0_30px_rgba(234,179,8,0.5)] mb-5 md:mb-6 transform-gpu"
-                            >
-                                <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent z-10"></div>
-                                <span className="relative z-20 text-black font-black text-base md:text-lg uppercase tracking-wide flex items-center justify-center gap-2">
-                                Enroll Now 
-                                <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                                </span>
-                            </button>
+                            // FREE COURSE BUTTON
+                            course.price === 0 ? (
+                                <button 
+                                    onClick={handleFreeEnrollment}
+                                    disabled={paymentLoading}
+                                    className="group relative w-full overflow-hidden rounded-xl bg-blue-500 p-3 md:p-4 transition-all hover:bg-blue-400 active:scale-[0.98] shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] mb-5 md:mb-6 transform-gpu"
+                                >
+                                    <span className="relative z-20 text-white font-black text-base md:text-lg uppercase tracking-wide flex items-center justify-center gap-2">
+                                    {paymentLoading ? "Processing..." : "Enroll for Free"}
+                                    <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                                    </span>
+                                </button>
+                            ) : (
+                                // PAID COURSE BUTTON
+                                <button 
+                                    onClick={() => setShowPaymentModal(true)}
+                                    className="group relative w-full overflow-hidden rounded-xl bg-yellow-500 p-3 md:p-4 transition-all hover:bg-yellow-400 active:scale-[0.98] shadow-[0_0_20px_rgba(234,179,8,0.3)] hover:shadow-[0_0_30px_rgba(234,179,8,0.5)] mb-5 md:mb-6 transform-gpu"
+                                >
+                                    <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/30 to-transparent z-10"></div>
+                                    <span className="relative z-20 text-black font-black text-base md:text-lg uppercase tracking-wide flex items-center justify-center gap-2">
+                                    Enroll Now 
+                                    <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                                    </span>
+                                </button>
+                            )
                         )}
 
                         <div className="space-y-3 md:space-y-4 text-xs md:text-sm text-gray-400 border-t border-white/10 pt-5 md:pt-6">
