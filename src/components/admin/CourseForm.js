@@ -205,7 +205,9 @@ export default function CourseForm({ existingData, onClose, onRefresh }) {
                         <option value="Beginner" className="bg-gray-900">Beginner</option>
                         <option value="Intermediate" className="bg-gray-900">Intermediate</option>
                         <option value="Advanced" className="bg-gray-900">Advanced</option>
+                        <option value="Class 9" className="bg-gray-900">Class 9</option>
                         <option value="Class 10" className="bg-gray-900">Class 10</option>
+                        <option value="Class 11" className="bg-gray-900">Class 11</option>
                         <option value="Class 12" className="bg-gray-900">Class 12</option>
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
