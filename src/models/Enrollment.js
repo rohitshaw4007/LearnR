@@ -4,6 +4,10 @@ const EnrollmentSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     course: { type: mongoose.Schema.Types.ObjectId, ref: "Course", required: true },
+    
+    // ✅ IMP: यह फील्ड पुरानी तारीख सेव करने के लिए जरूरी है
+    enrolledAt: { type: Date, default: Date.now },
+
     amount: { type: Number, required: true }, 
     status: { 
       type: String, 
@@ -33,7 +37,7 @@ const EnrollmentSchema = new mongoose.Schema(
         transactionId: String,
         amount: Number,
         date: { type: Date, default: Date.now },
-        month: String, // e.g. "January 2024 - February 2024"
+        month: String, 
         status: String,
         method: { type: String, default: "Online" } 
       }

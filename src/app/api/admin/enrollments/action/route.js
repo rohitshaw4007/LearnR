@@ -11,7 +11,7 @@ export async function POST(req) {
     const body = await req.json();
 
     // ======================================================
-    // CASE 1: APPROVE/REJECT EXISTING REQUEST (From Dashboard)
+    // CASE 1: APPROVE/REJECT EXISTING REQUEST
     // ======================================================
     if (body.enrollmentId && body.action) {
         const { enrollmentId, action } = body;
@@ -46,13 +46,12 @@ export async function POST(req) {
             }
             await enrollment.save();
 
-            // 2. User Update (Add Course ID to User's list)
+            // 2. User Update
             await User.findByIdAndUpdate(enrollment.user._id, {
                 $addToSet: { courses: enrollment.course._id },
             });
 
-            // 3. Course Update (FIXED: Increment Student Count by 1)
-            // Error yahan tha, hum ID push kar rahe the jabki ye Number field hai
+            // 3. Course Update
             await Course.findByIdAndUpdate(enrollment.course._id, {
                 $inc: { students: 1 }, 
             });
@@ -99,7 +98,7 @@ export async function POST(req) {
                 }
             }
 
-            // Data Delete karein
+            // Data Delete
             await Enrollment.findByIdAndDelete(enrollmentId);
 
             return NextResponse.json({ message: "Request Rejected and Data Deleted" });
@@ -107,9 +106,9 @@ export async function POST(req) {
     }
 
     // ======================================================
-    // CASE 2: MANUAL ENTRY (Admin adds student manually)
+    // CASE 2: MANUAL ENTRY (With Date & Full Payment Fix)
     // ======================================================
-    const { userId, courseId } = body;
+    const { userId, courseId, joinDate, initialPaidAmount } = body;
 
     if (!userId || !courseId) {
       return NextResponse.json({ message: "User ID and Course ID are required" }, { status: 400 });
@@ -120,34 +119,82 @@ export async function POST(req) {
       return NextResponse.json({ message: "User is already enrolled in this course" }, { status: 400 });
     }
 
+    const course = await Course.findById(courseId);
+    
+    // --- 1. DATE FIX: Ensure correct parsing ---
     const now = new Date();
-    const nextDue = new Date(now);
-    nextDue.setMonth(nextDue.getMonth() + 1);
+    // Use the provided joinDate (must be YYYY-MM-DD string) or default to now
+    const startDate = joinDate ? new Date(joinDate) : now;
 
+    // --- 2. PAYMENT FIX: Calculate Next Payment Due correctly ---
+    let nextDue = new Date(startDate);
+    
+    if (!isNaN(startDate.getTime())) {
+        // Loop until nextDue is in the future
+        while (nextDue <= now) {
+            nextDue.setMonth(nextDue.getMonth() + 1);
+        }
+    } else {
+        // Fallback
+        nextDue = new Date(now);
+        nextDue.setMonth(nextDue.getMonth() + 1);
+    }
+
+    // --- 3. AMOUNT FIX: Use the Total Calculated Amount ---
+    // If initialPaidAmount is sent (it should be), use it. otherwise fallback.
+    let finalInitialAmount = 0;
+    if (initialPaidAmount !== undefined && initialPaidAmount !== null) {
+        finalInitialAmount = Number(initialPaidAmount);
+    } else if (course && course.price > 0) {
+        // Fallback calculation in backend
+        const monthsDiff = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+        const multiplier = monthsDiff >= 0 ? monthsDiff + 1 : 1;
+        finalInitialAmount = course.price * multiplier;
+    }
+
+    // Create Enrollment
     const newEnrollment = await Enrollment.create({
       user: userId, 
       course: courseId,
-      enrolledAt: now,
+      
+      // Explicitly setting dates
+      enrolledAt: startDate,        
+      subscriptionStart: startDate, 
+      lastPaymentDate: startDate,   
+      
       status: "approved", 
-      amount: 0, 
+      amount: course.price || 0,    // Monthly recurring fee
       transactionId: "MANUAL_ADMIN_ENTRY",
-      subscriptionStart: now,
-      nextPaymentDue: nextDue, 
+      
+      nextPaymentDue: nextDue,      // Future date
       isBlocked: false,
+      
+      // THIS IS THE KEY FIX FOR PAYMENT HISTORY
       paymentHistory: [{
           transactionId: "MANUAL_ADMIN_ENTRY",
-          amount: 0,
-          date: now,
-          month: "Joining (Manual)",
+          amount: finalInitialAmount, // Full Accumulated Amount
+          date: startDate,            // Backdated payment date
+          month: "Joining (Manual/Offline) - Accumulated",
           status: "success",
           method: "Manual Enrollment"
       }]
     });
 
-    // Update User
+    // --- 4. DATE OVERWRITE FIX (Force createdAt) ---
+    // Mongoose creates with 'now', we must update it immediately
+    await Enrollment.findByIdAndUpdate(
+        newEnrollment._id,
+        { 
+            $set: { 
+                createdAt: startDate, 
+                updatedAt: startDate 
+            } 
+        },
+        { timestamps: false } // Prevent auto-update to now
+    );
+
+    // Update User & Course
     await User.findByIdAndUpdate(userId, { $addToSet: { courses: courseId } });
-    
-    // Update Course (FIXED HERE TOO)
     await Course.findByIdAndUpdate(courseId, { $inc: { students: 1 } });
 
     return NextResponse.json(

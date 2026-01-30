@@ -4,25 +4,21 @@ import Enrollment from "@/models/Enrollment";
 import User from "@/models/User"; 
 import Course from "@/models/Course"; 
 import nodemailer from "nodemailer"; 
+import { addMonths } from "date-fns"; 
 
 export const dynamic = "force-dynamic";
 
-// Helper to calculate target month names
 const getTargetMonths = (startFromDate, monthsCount) => {
     if (!startFromDate) return "N/A";
     const startDate = new Date(startFromDate);
-    const endDate = new Date(startDate.getTime()); // Create copy to avoid mutation
-    endDate.setMonth(endDate.getMonth() + monthsCount - 1);
+    const endDate = addMonths(startDate, monthsCount - 1); 
     
     const startStr = startDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-    
     if (monthsCount === 1) return startStr;
-    
     const endStr = endDate.toLocaleString('default', { month: 'long', year: 'numeric' });
     return `${startStr} to ${endStr}`;
 };
 
-// GET METHOD
 export async function GET(req, { params }) {
   try {
     const { id } = await params; 
@@ -75,39 +71,15 @@ export async function GET(req, { params }) {
       });
 
       const joinDate = new Date(enroll.subscriptionStart || enroll.createdAt);
-      const joinedInTargetMonth = joinDate.getMonth() === targetMonth && joinDate.getFullYear() === targetYear;
-      const joiningAmount = enroll.amount || 0;
-      const hasJoiningEntry = history.some(h => h.month === "Joining Fee" || h.transactionId?.startsWith("JOINING"));
-
-      if (!hasJoiningEntry) {
-          const joiningTxn = {
-              transactionId: "JOINING-" + enroll._id.toString().slice(-6).toUpperCase(),
-              amount: joiningAmount,
-              date: joinDate, 
-              month: "Joining Fee",
-              method: "Online / First Payment",
-              status: "success"
-          };
-          history.push(joiningTxn);
-
-          if (joinedInTargetMonth && paidAmountInTargetMonth === 0) {
-              paidAmountInTargetMonth += joiningAmount;
-              hasPaidThisMonth = true;
-              
-              const monthKey = joinDate.toLocaleString('default', { month: 'short', year: 'numeric' });
-              if (!graphDataMap[monthKey]) graphDataMap[monthKey] = 0;
-              graphDataMap[monthKey] += joiningAmount;
-          }
-      }
-
+      
       history.sort((a, b) => new Date(b.date) - new Date(a.date));
 
       let nextDue = enroll.nextPaymentDue;
       if (!nextDue) {
           const autoDate = new Date(joinDate);
-          autoDate.setMonth(autoDate.getMonth() + 1);
+          // ✅ FIX: Default Next Due is always 1st of next month
           autoDate.setDate(1); 
-          nextDue = autoDate;
+          nextDue = addMonths(autoDate, 1);
       }
 
       const now = new Date();
@@ -161,7 +133,6 @@ export async function GET(req, { params }) {
   }
 }
 
-// POST METHOD (Manual Payment)
 export async function POST(req) {
     try {
         await connectDB();
@@ -171,18 +142,16 @@ export async function POST(req) {
         const enrollment = await Enrollment.findById(enrollmentId).populate("user").populate("course");
         if (!enrollment) return NextResponse.json({ error: "Enrollment not found" }, { status: 404 });
 
-        // --- FIXED LOGIC ---
-        // Always use nextPaymentDue as base, regardless of whether it's overdue or not.
-        // This preserves the billing cycle.
         let baseDate = enrollment.nextPaymentDue ? new Date(enrollment.nextPaymentDue) : new Date();
         
-        // REMOVED: if (baseDate < new Date()) baseDate = new Date(); 
+        // ✅ Ensure Calculation starts from 1st
+        baseDate.setDate(1);
 
-        // Correctly calculate cycle based on nextDue
         const billingCycleName = getTargetMonths(baseDate, monthsToAdd);
 
-        const newDueDate = new Date(baseDate);
-        newDueDate.setMonth(newDueDate.getMonth() + monthsToAdd);
+        // ✅ Add months and KEEP it on 1st
+        const newDueDate = addMonths(baseDate, monthsToAdd);
+        newDueDate.setDate(1);
 
         enrollment.nextPaymentDue = newDueDate;
         enrollment.lastPaymentDate = new Date();
@@ -230,7 +199,6 @@ export async function POST(req) {
     }
 }
 
-// PUT METHOD (Unblock)
 export async function PUT(req) {
     try {
         await connectDB();
