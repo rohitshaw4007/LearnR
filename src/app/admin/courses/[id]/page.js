@@ -1,10 +1,10 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ArrowLeft, Edit, Trash2, Lock, Unlock, Eye, EyeOff, 
-  Users, IndianRupee, Clock, Wallet, Search, UserX, AlertCircle, UserPlus, CreditCard, X
+  Users, IndianRupee, Clock, Wallet, Search, UserX, AlertCircle, UserPlus, CreditCard, X, CheckCircle
 } from "lucide-react";
 import CourseForm from "@/components/admin/CourseForm";
 
@@ -23,6 +23,12 @@ export default function CourseDetailsPage() {
   const [enrollLoading, setEnrollLoading] = useState(false);
   const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
   
+  // Smart Search States (New Logic)
+  const [allUsers, setAllUsers] = useState([]); // Store all users for searching
+  const [filteredUsers, setFilteredUsers] = useState([]); // Filtered list for dropdown
+  const [showDropdown, setShowDropdown] = useState(false); // Toggle dropdown visibility
+  const wrapperRef = useRef(null); // To detect click outside
+
   // Loading State for removing student
   const [removingId, setRemovingId] = useState(null);
   
@@ -35,8 +41,13 @@ export default function CourseDetailsPage() {
       const studentsRes = await fetch(`/api/admin/courses/${id}/students`);
       const studentsData = await studentsRes.json();
 
+      // Fetch ALL users for the smart search suggestion
+      const usersRes = await fetch(`/api/admin/users`);
+      const usersData = await usersRes.json();
+
       if (courseRes.ok) setCourse(courseData.course || courseData);
       if (studentsRes.ok) setStudentsList(studentsData);
+      if (usersRes.ok) setAllUsers(usersData.users || usersData); // Populate all users
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -48,6 +59,17 @@ export default function CourseDetailsPage() {
   useEffect(() => {
     if(id) fetchData();
   }, [id]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [wrapperRef]);
 
   const handleToggle = async (field, value) => {
     const originalValue = course[field];
@@ -104,6 +126,29 @@ export default function CourseDetailsPage() {
     }
   };
 
+  // Logic for smart input change
+  const handleEnrollInputChange = (e) => {
+    const query = e.target.value;
+    setEnrollEmail(query);
+
+    if (query.length > 0) {
+      const matches = allUsers.filter(user => 
+        (user.name?.toLowerCase().includes(query.toLowerCase()) || 
+         user.email?.toLowerCase().includes(query.toLowerCase()))
+      );
+      setFilteredUsers(matches);
+      setShowDropdown(true);
+    } else {
+      setShowDropdown(false);
+    }
+  };
+
+  // Select user from dropdown
+  const selectUser = (email) => {
+    setEnrollEmail(email);
+    setShowDropdown(false);
+  };
+
   const handleManualEnroll = async (e) => {
     e.preventDefault();
     if(!enrollEmail) return;
@@ -135,17 +180,41 @@ export default function CourseDetailsPage() {
 
   // Reusable Components
   const manualEnrollFormContent = (
-    <form onSubmit={handleManualEnroll} className="space-y-3 md:space-y-4 relative z-10">
-        <div>
-            <label className="text-[10px] uppercase font-bold text-gray-500 mb-1 block">Student Email</label>
+    <form onSubmit={handleManualEnroll} className="space-y-3 md:space-y-4 relative z-10" ref={wrapperRef}>
+        <div className="relative">
+            <label className="text-[10px] uppercase font-bold text-gray-500 mb-1 block">Student Search</label>
             <input 
                 required
-                type="email" 
+                type="text" 
                 value={enrollEmail}
-                onChange={(e) => setEnrollEmail(e.target.value)}
-                placeholder="student@example.com"
+                onChange={handleEnrollInputChange}
+                onFocus={() => enrollEmail && setShowDropdown(true)}
+                placeholder="Type name or email..."
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 md:py-3 text-sm focus:border-yellow-400 outline-none transition-all text-white"
+                autoComplete="off"
             />
+            
+            {/* Smart Dropdown */}
+            {showDropdown && filteredUsers.length > 0 && (
+              <div className="absolute top-full left-0 w-full mt-1 max-h-48 overflow-y-auto bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 custom-scrollbar">
+                {filteredUsers.map((user) => (
+                  <div 
+                    key={user._id}
+                    onClick={() => selectUser(user.email)}
+                    className="px-4 py-2 hover:bg-white/10 cursor-pointer border-b border-white/5 last:border-0"
+                  >
+                    <p className="text-sm font-bold text-white">{user.name}</p>
+                    <p className="text-xs text-gray-400">{user.email}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {showDropdown && filteredUsers.length === 0 && enrollEmail && (
+               <div className="absolute top-full left-0 w-full mt-1 p-3 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl z-50 text-xs text-gray-500 text-center">
+                 No users found. You can still type the full email manually.
+               </div>
+            )}
         </div>
         <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center gap-3">
             <div className="p-2 bg-green-500/20 rounded-full text-green-400">
