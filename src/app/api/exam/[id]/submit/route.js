@@ -20,6 +20,7 @@ export async function POST(req, { params }) {
     const userId = await getDataFromToken(req);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    // Double Submission Check
     const existingResult = await Result.findOne({ testId: id, studentId: userId });
     if (existingResult) {
         return NextResponse.json({ error: "Exam already submitted" }, { status: 400 });
@@ -45,7 +46,9 @@ export async function POST(req, { params }) {
         }, { status: 400 });
     }
 
-    // Calculate Score
+    // ==========================================
+    // 🛠️ SCORE CALCULATION LOGIC (NO NEGATIVE MARKING)
+    // ==========================================
     let score = 0;
     let correctCount = 0;
     let wrongCount = 0;
@@ -55,24 +58,29 @@ export async function POST(req, { params }) {
         const correctAns = q.correctOption;
         const questionMarks = parseFloat(q.marks) || 1; 
 
+        // Check if student attempted the question
         if (userAns !== undefined && userAns !== null && parseInt(userAns) !== -1) {
             const userAnsInt = parseInt(userAns);
             const correctAnsInt = parseInt(correctAns);
 
             if (!isNaN(correctAnsInt)) {
                 if (userAnsInt === correctAnsInt) {
+                    // Answer is CORRECT
                     score += questionMarks; 
                     correctCount++;
                 } else {
-                    score -= 0.25; 
+                    // Answer is WRONG 
+                    // Yahan pehle "score -= 0.25;" tha jo maine hata diya hai. Ab koi negative mark nahi katega.
                     wrongCount++;
                 }
             }
         }
     });
 
+    // Score kabhi negative me na jaye isliye safety check
     if (score < 0) score = 0;
 
+    // 3. Save Result in Database
     const newResult = await Result.create({
         testId: id,
         studentId: userId,
@@ -85,7 +93,7 @@ export async function POST(req, { params }) {
         timeTaken: timeTaken || 0,
     });
 
-    // Send Email
+    // --- 4. SEND SUCCESS MAIL ---
     try {
         const user = await User.findById(userId);
         if (user && user.email) {
@@ -97,10 +105,22 @@ export async function POST(req, { params }) {
                 from: process.env.EMAIL_USER,
                 to: user.email,
                 subject: `Exam Submitted: ${test.title}`,
-                html: `<p>Your Score: <strong>${score} / ${test.totalMarks}</strong></p>`,
+                html: `
+                  <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                    <h2 style="color: #22c55e;">Exam Submitted Successfully!</h2>
+                    <p>Hi <strong>${user.name}</strong>,</p>
+                    <p>You have successfully submitted the exam: <strong>${test.title}</strong>.</p>
+                    <p>Your Score: <strong>${score} / ${test.totalMarks}</strong></p>
+                    <p>View your detailed result on the dashboard.</p>
+                    <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
+                    <p style="font-size: 12px; color: #888;">LearnR Examination System</p>
+                  </div>
+                `,
             });
         }
-    } catch (mailError) {}
+    } catch (mailError) {
+        // Mail error ko ignore karte hain taaki result save ho jaye
+    }
 
     return NextResponse.json({ 
         success: true, 
