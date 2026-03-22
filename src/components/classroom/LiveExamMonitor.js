@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { 
   ArrowLeft, StopCircle, RefreshCcw, User, 
   Clock, CheckCircle, Loader2, Search, Timer, 
-  Calendar, TrendingUp, AlertTriangle
+  TrendingUp
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
@@ -19,12 +19,11 @@ export default function LiveExamMonitor({ testId, onBack }) {
   const [timeProgress, setTimeProgress] = useState(0);
   const [isTimeCritical, setIsTimeCritical] = useState(false);
 
-  // 1. DATA FETCHING (Fixed with Cache Busting & Debugging)
+  // 1. DATA FETCHING 
   const fetchLiveData = async () => {
     console.log(`\n🔄 [MONITOR] Fetching Latest Data for Test ID: ${testId} at ${new Date().toLocaleTimeString()}`);
     
     try {
-      // 🔥 FIX: Added timestamp to prevent caching
       const t = new Date().getTime();
 
       // A. Fetch Test Details
@@ -39,7 +38,8 @@ export default function LiveExamMonitor({ testId, onBack }) {
       console.log("📄 [MONITOR] Test Details Received:", {
           title: testData.title,
           status: testData.status,
-          scheduledAt: testData.scheduledAt
+          scheduledAt: testData.scheduledAt,
+          validityHours: testData.validityHours
       });
       setTestDetails(testData);
 
@@ -51,18 +51,7 @@ export default function LiveExamMonitor({ testId, onBack }) {
 
       if (analyticsRes.ok) {
         const analyticsData = await analyticsRes.json();
-        console.log(`📊 [MONITOR] Analytics Updated:
-          - Total Submissions: ${analyticsData.analytics?.stats?.present || 0}
-          - Top Score: ${analyticsData.analytics?.topStudents?.[0]?.score || 0}
-        `);
-        // Note: Check backend structure carefully. 
-        // Based on previous files, 'analytics' object contains 'studentsData', 'topStudents', etc.
-        // But your component uses 'analytics.submissions'. 
-        // Adapting frontend to match backend structure or vice versa is crucial.
-        // Assuming Backend sends { analytics: { studentsData: [...] } }
-        // We will map it correctly below to avoid crashes.
         
-        // Mapping for component compatibility if backend structure differs
         const submissions = analyticsData.analytics?.studentsData?.filter(s => s.status === 'Present').map(s => ({
             studentName: s.name,
             email: s.email,
@@ -72,9 +61,9 @@ export default function LiveExamMonitor({ testId, onBack }) {
 
         setAnalytics({
             ...analyticsData,
-            submissions: submissions, // Flattened for easy use
+            submissions: submissions,
             highestScore: analyticsData.analytics?.topStudents?.[0]?.score || 0,
-            averageScore: 0 // You can calculate this if needed
+            averageScore: 0 
         });
 
       } else {
@@ -93,27 +82,28 @@ export default function LiveExamMonitor({ testId, onBack }) {
   useEffect(() => {
     if (!testId) return;
     
-    console.log("🚀 [MONITOR] Component Mounted. Starting Live Tracking...");
     fetchLiveData();
     
     const interval = setInterval(() => {
-        console.log("⏰ [MONITOR] Auto-refreshing data...");
         fetchLiveData();
-    }, 15000); // 15 seconds
+    }, 15000); 
 
     return () => {
-        console.log("🛑 [MONITOR] Component Unmounted. Stopping Tracker.");
         clearInterval(interval);
     };
   }, [testId]);
 
-  // 2. LIVE COUNTDOWN LOGIC
+  // 2. LIVE COUNTDOWN LOGIC (FIXED VALIDITY HOURS)
   useEffect(() => {
     if (!testDetails) return;
 
     const calculateTime = () => {
       const startTime = new Date(testDetails.scheduledAt).getTime();
-      const windowDurationMs = 12 * 60 * 60 * 1000; 
+      
+      // 🔥 FIX: Removed 12 hours hardcoding, using DB validityHours
+      const validHours = testDetails.validityHours || 24;
+      const windowDurationMs = validHours * 60 * 60 * 1000; 
+      
       const endTime = startTime + windowDurationMs;
       const now = new Date().getTime();
       
@@ -150,7 +140,6 @@ export default function LiveExamMonitor({ testId, onBack }) {
   const handleEndExam = async () => {
     if (!confirm("Are you sure you want to END this exam?")) return;
     
-    console.log("⚠️ [MONITOR] Manual End Exam Requested");
     setEndingExam(true);
     
     try {
@@ -161,14 +150,12 @@ export default function LiveExamMonitor({ testId, onBack }) {
       });
 
       if (res.ok) {
-        console.log("✅ [MONITOR] Exam Ended Successfully");
         toast.success("Exam has been ended successfully!");
         onBack(); 
       } else {
         throw new Error("Failed to end exam");
       }
     } catch (error) {
-      console.error("🔥 [MONITOR] End Exam Error:", error);
       toast.error("Error ending exam");
     } finally {
       setEndingExam(false);
@@ -189,8 +176,10 @@ export default function LiveExamMonitor({ testId, onBack }) {
     );
   }
 
+  // 🔥 FIX: Calculate Window End Time dynamically for Rendering
   const startTimeObj = testDetails ? new Date(testDetails.scheduledAt) : new Date();
-  const windowEndTimeObj = new Date(startTimeObj.getTime() + (12 * 60 * 60 * 1000));
+  const validHoursRender = testDetails?.validityHours || 24;
+  const windowEndTimeObj = new Date(startTimeObj.getTime() + (validHoursRender * 60 * 60 * 1000));
 
   return (
     <div className="animate-in fade-in slide-in-from-right duration-300 pb-20">
@@ -258,7 +247,7 @@ export default function LiveExamMonitor({ testId, onBack }) {
                           <span className="text-white font-mono font-bold">{startTimeObj.toLocaleTimeString()}</span>
                       </div>
                       <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                          <span className="text-gray-500 text-sm">Window Ends (12h)</span>
+                          <span className="text-gray-500 text-sm">Window Ends ({validHoursRender}h)</span>
                           <span className="text-red-400 font-mono font-bold">{windowEndTimeObj.toLocaleTimeString()}</span>
                       </div>
                       <div className="flex justify-between items-center">

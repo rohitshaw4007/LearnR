@@ -30,14 +30,15 @@ const cardVariants = {
   }
 };
 
-// --- HELPER COMPONENT ---
-const CountdownTimer = ({ scheduledAt }) => {
+// --- HELPER COMPONENT (FIXED HARDCODED 12 HOURS) ---
+const CountdownTimer = ({ scheduledAt, validityHours = 24 }) => {
   const [timeLeft, setTimeLeft] = useState("...");
 
   useEffect(() => {
     const calculateTime = () => {
       const startTime = new Date(scheduledAt).getTime();
-      const WINDOW_DURATION = 12 * 60 * 60 * 1000; 
+      // FIX: Ab DB ki value aayegi (Default 24h if missing)
+      const WINDOW_DURATION = validityHours * 60 * 60 * 1000; 
       const endTime = startTime + WINDOW_DURATION;
       const now = new Date().getTime();
       const difference = endTime - now;
@@ -54,7 +55,7 @@ const CountdownTimer = ({ scheduledAt }) => {
     calculateTime();
     const timer = setInterval(calculateTime, 1000);
     return () => clearInterval(timer);
-  }, [scheduledAt]);
+  }, [scheduledAt, validityHours]);
 
   return <span className="font-mono text-yellow-400 font-bold tracking-widest">{timeLeft}</span>;
 };
@@ -86,11 +87,15 @@ export default function StudentTestViewer({ courseId }) {
     return () => { isMounted = false; };
   }, [courseId]);
 
+  // FIX: Hardcoded 12 hours removed from exam status check
   const getExamStatus = (test) => {
     if (test.isAttempted) return "ATTEMPTED";
     const now = new Date();
     const start = new Date(test.scheduledAt);
-    const end = new Date(start.getTime() + (12 * 60 * 60 * 1000));
+    
+    // Yahan pehle 12 * 60 * 60 * 1000 tha, usko test.validityHours me change kiya
+    const validHours = test.validityHours || 24;
+    const end = new Date(start.getTime() + (validHours * 60 * 60 * 1000));
 
     if (test.status === 'live') return "LIVE";
     if (test.status === 'completed' || now > end) return "ENDED";
@@ -201,7 +206,7 @@ export default function StudentTestViewer({ courseId }) {
 
       <div className="max-w-7xl mx-auto space-y-4 md:space-y-16">
         
-        {/* 3. FEATURED CARD (Adaptive: Banner on Mobile, Big Card on PC) */}
+        {/* 3. FEATURED CARD */}
         {featuredTest && (() => {
              const status = getExamStatus(featuredTest);
              const isLive = status === 'LIVE';
@@ -227,7 +232,12 @@ export default function StudentTestViewer({ courseId }) {
                                     <span className={`px-2 py-0.5 md:px-3 md:py-1 rounded-sm text-[10px] md:text-xs font-black tracking-widest border ${isLive ? 'bg-red-500/10 text-red-500 border-red-500 animate-pulse' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500'}`}>
                                         {status}
                                     </span>
-                                    {isLive && <div className="hidden md:flex items-center gap-2 text-yellow-500 text-xs md:text-base"><Clock size={14}/><CountdownTimer scheduledAt={featuredTest.scheduledAt}/></div>}
+                                    {isLive && (
+                                        <div className="hidden md:flex items-center gap-2 text-yellow-500 text-xs md:text-base">
+                                            <Clock size={14}/>
+                                            <CountdownTimer scheduledAt={featuredTest.scheduledAt} validityHours={featuredTest.validityHours} />
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 <h2 className="text-lg md:text-5xl font-black text-white mb-1 md:mb-6 uppercase leading-tight line-clamp-1 md:line-clamp-2">
@@ -252,7 +262,7 @@ export default function StudentTestViewer({ courseId }) {
              );
         })()}
 
-        {/* 4. GRID CARDS (Mobile: Compact List | PC: Grid) */}
+        {/* 4. GRID CARDS */}
         {filteredTests.length > 0 ? (
             <motion.div 
                 variants={containerVariants}
@@ -270,7 +280,6 @@ export default function StudentTestViewer({ courseId }) {
                             variants={cardVariants}
                             whileHover="hover"
                             onClick={(e) => status !== 'UPCOMING' && handleCardClick(e, test)}
-                            // Changed Layout for Mobile: flex-row (Ad/Banner style) vs flex-col (Card style)
                             className={`
                                 relative bg-[#080808] border border-white/5 rounded-lg md:rounded-xl cursor-pointer group overflow-hidden
                                 p-3 md:p-6
@@ -303,7 +312,7 @@ export default function StudentTestViewer({ courseId }) {
                                 {isLive && (
                                     <div className="hidden md:flex text-[10px] md:text-xs text-red-500 mb-3 md:mb-4 font-mono items-center gap-2">
                                         <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping"></span>
-                                        Ends: <CountdownTimer scheduledAt={test.scheduledAt} />
+                                        Ends: <CountdownTimer scheduledAt={test.scheduledAt} validityHours={test.validityHours} />
                                     </div>
                                 )}
 
