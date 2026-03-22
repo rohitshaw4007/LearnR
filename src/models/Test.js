@@ -17,6 +17,7 @@ const TestSchema = new mongoose.Schema({
   
   scheduledAt: { type: Date, required: true },
   duration: { type: Number, required: true }, // in minutes
+  validityHours: { type: Number, default: 24 }, // NEW: Exam window active for X hours
   totalMarks: { type: Number, default: 100 },
   
   isManualStart: { type: Boolean, default: false },

@@ -27,20 +27,19 @@ export default function MCQManager({ courseId, onBack }) {
   const [previewModalOpen, setPreviewModalOpen] = useState(false); 
   
   // Selection States
-  const [selectedTestId, setSelectedTestId] = useState(null); // For Editor (Draft/Scheduled)
-  const [selectedAnalyticsTestId, setSelectedAnalyticsTestId] = useState(null); // For Analytics (Completed)
-  const [selectedLiveTestId, setSelectedLiveTestId] = useState(null); // For Live Monitor
+  const [selectedTestId, setSelectedTestId] = useState(null);
+  const [selectedAnalyticsTestId, setSelectedAnalyticsTestId] = useState(null); 
+  const [selectedLiveTestId, setSelectedLiveTestId] = useState(null); 
   
   const [selectedTestForDownload, setSelectedTestForDownload] = useState(null); 
   const [selectedTestForPreview, setSelectedTestForPreview] = useState(null); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Form State
+  // Form State (Added validityHours: 24 as default)
   const [formData, setFormData] = useState({
-    title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, totalMarks: 100, isManualStart: false,
+    title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, validityHours: 24, totalMarks: 100, isManualStart: false,
   });
 
-  // 1. FETCH TESTS
   const fetchTests = async () => {
     try {
       const res = await fetch(`/api/admin/courses/${courseId}/tests?type=mcq`);
@@ -57,11 +56,9 @@ export default function MCQManager({ courseId, onBack }) {
   };
 
   useEffect(() => {
-    // Agar koi specific page open nahi hai, tabhi refresh karein
     if(courseId && !selectedTestId && !selectedAnalyticsTestId && !selectedLiveTestId) fetchTests(); 
   }, [courseId, selectedTestId, selectedAnalyticsTestId, selectedLiveTestId]);
 
-  // 2. CREATE TEST HANDLER
   const handleCreate = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -77,7 +74,8 @@ export default function MCQManager({ courseId, onBack }) {
       toast.success("Exam Draft Created!");
       setIsModalOpen(false);
       setSelectedTestId(data._id);
-      setFormData({ title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, totalMarks: 100, isManualStart: false });
+      // Reset Form
+      setFormData({ title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, validityHours: 24, totalMarks: 100, isManualStart: false });
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -85,7 +83,6 @@ export default function MCQManager({ courseId, onBack }) {
     }
   };
 
-  // 3. START/STOP TOGGLE
   const toggleStatus = async (testId, newStatus) => {
     try {
         const res = await fetch(`/api/admin/tests/${testId}`, {
@@ -106,7 +103,6 @@ export default function MCQManager({ courseId, onBack }) {
     } catch (err) { toast.error("Action failed"); }
   };
 
-  // 4. DELETE TEST
   const handleDelete = async (testId) => {
       if(!confirm("Are you sure you want to CANCEL and DELETE this exam? This action cannot be undone.")) return;
       try {
@@ -121,7 +117,6 @@ export default function MCQManager({ courseId, onBack }) {
       } catch(err) { toast.error("Error deleting exam"); }
   };
 
-  // 5. PDF GENERATOR
   const generatePDF = async (type) => {
     if (!selectedTestForDownload) return;
     setIsDownloading(true);
@@ -270,7 +265,6 @@ export default function MCQManager({ courseId, onBack }) {
            />;
   }
 
-  // --- MAIN CARD LIST ---
   const filteredTests = tests.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -279,7 +273,6 @@ export default function MCQManager({ courseId, onBack }) {
         <ArrowLeft size={16} className="mr-2"/> Back to Selection
       </button>
 
-      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-10">
         <div>
            <h1 className="text-2xl md:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-yellow-200 to-yellow-500">MCQ Manager</h1>
@@ -310,7 +303,6 @@ export default function MCQManager({ courseId, onBack }) {
                   key={test._id}
                   className="group relative bg-[#0a0a0a] border border-white/5 hover:border-yellow-500/50 rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.2)] cursor-pointer"
                 >
-                   {/* STATUS BADGES */}
                    <div className="absolute top-4 right-4 z-10">
                       {test.status === 'live' ? (
                           <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-black tracking-wider animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.2)]">
@@ -341,7 +333,6 @@ export default function MCQManager({ courseId, onBack }) {
                         </div>
                    </div>
 
-                   {/* Actions Footer */}
                    <div className="flex items-center justify-between border-t border-white/5 pt-4 mt-2">
                       <div className="text-xs font-mono text-gray-500">{test.questions?.length || 0} Qs • {test.totalMarks} Marks</div>
                       
@@ -374,7 +365,7 @@ export default function MCQManager({ courseId, onBack }) {
          )}
       </div>
 
-      {/* CREATE MODAL (UPDATED WITH LABELS) */}
+      {/* CREATE MODAL (UPDATED WITH 3 COLUMNS AND VALIDITY FIELD) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
            <div className="bg-[#111] border border-white/10 w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl">
@@ -402,11 +393,15 @@ export default function MCQManager({ courseId, onBack }) {
                     </div>
                  </div>
 
-                 {/* Duration & Marks Inputs */}
-                 <div className="grid grid-cols-2 gap-4">
+                 {/* NEW: Duration, Validity & Marks Inputs */}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Duration (Mins)</label>
                         <input type="number" min="1" required value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                    </div>
+                    <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block text-yellow-500">Valid For (Hours)</label>
+                        <input type="number" min="1" required value={formData.validityHours} onChange={e => setFormData({...formData, validityHours: e.target.value})} className="w-full bg-black border border-yellow-500/50 rounded-lg p-3 text-white outline-none focus:border-yellow-500" placeholder="e.g. 24"/>
                     </div>
                     <div>
                         <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Total Marks</label>
@@ -465,7 +460,6 @@ export default function MCQManager({ courseId, onBack }) {
       {previewModalOpen && selectedTestForPreview && (
           <div className="fixed inset-0 z-[250] bg-black/95 flex flex-col animate-in fade-in duration-300 items-center justify-center p-4">
              <div className="w-full h-full max-w-7xl bg-[#050505] flex flex-col rounded-3xl overflow-hidden shadow-[0_0_80px_-20px_rgba(234,179,8,0.2)] border border-yellow-500/20 relative">
-                {/* Header with Admin Controls */}
                 <div className="bg-[#0a0a0a] border-b border-white/10 p-5 flex flex-col md:flex-row justify-between items-center relative overflow-hidden gap-4 md:gap-0">
                     <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-yellow-500 via-orange-500 to-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.8)]"></div>
                     
@@ -500,7 +494,6 @@ export default function MCQManager({ courseId, onBack }) {
                     </div>
                 </div>
 
-                {/* Content (Paper) */}
                 <div className="flex-1 bg-[#050505] p-6 md:p-10 overflow-y-auto relative scroll-smooth">
                         <div className="max-w-4xl mx-auto space-y-8 pb-10">
                             {selectedTestForPreview.questions?.map((q, idx) => (

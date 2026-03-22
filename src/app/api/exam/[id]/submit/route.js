@@ -15,29 +15,42 @@ export async function POST(req, { params }) {
     const userId = await getDataFromToken(req);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // FIX 1: Double Submission Check - Agar pehle submit kiya hai toh dobara save na kare
     const existingResult = await Result.findOne({ testId: id, studentId: userId });
     if (existingResult) {
         return NextResponse.json({ error: "Exam already submitted" }, { status: 400 });
     }
 
-    // 1. Fetch Original Test
     const test = await Test.findById(id);
     if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
-    // --- Time Validation Logic ---
+    // --- NEW: Time Validation Logic with Validity Hours ---
     const startTime = new Date(test.scheduledAt).getTime();
-    const endTime = startTime + (12 * 60 * 60 * 1000); 
+    
+    // FIX: Hardcoded 12 hours removed. Using validityHours from DB.
+    const validityHours = test.validityHours || 24; 
+    const validityMs = validityHours * 60 * 60 * 1000;
+    
+    const endTime = startTime + validityMs; 
     const currentTime = Date.now();
-    const bufferTime = 5 * 60 * 1000; 
+    const bufferTime = 5 * 60 * 1000; // 5 mins grace period (Internet slow hone ke case me)
+
+    // ================= [ DEBUG LOGS ] =================
+    console.log(`\n--- [SUBMIT EXAM DEBUG] ---`);
+    console.log(`Test ID: ${test._id}`);
+    console.log(`Validity Set: ${validityHours} Hours`);
+    console.log(`Window Expiry Time: ${new Date(endTime).toLocaleString()}`);
+    console.log(`Submission Attempt Time: ${new Date(currentTime).toLocaleString()}`);
+    console.log(`-------------------------------\n`);
+    // ==================================================
 
     if (currentTime > (endTime + bufferTime)) {
+        console.log(`[SUBMIT EXAM DEBUG] ❌ Rejected! Time Over.`);
         return NextResponse.json({ 
-            error: "Exam time is over! Submission not accepted." 
+            error: "The validity window for this exam is over. Submission not accepted." 
         }, { status: 400 });
     }
+    // ----------------------------------------------------
 
-    // 2. Calculate Score (STRICT LOGIC FIX)
     let score = 0;
     let correctCount = 0;
     let wrongCount = 0;
@@ -45,7 +58,7 @@ export async function POST(req, { params }) {
     test.questions.forEach((q, index) => {
         const userAns = answers[index];
         const correctAns = q.correctOption;
-        const questionMarks = parseFloat(q.marks) || 1; // Strict Number parsing
+        const questionMarks = parseFloat(q.marks) || 1; 
 
         if (userAns !== undefined && userAns !== null && parseInt(userAns) !== -1) {
             const userAnsInt = parseInt(userAns);
@@ -56,7 +69,7 @@ export async function POST(req, { params }) {
                     score += questionMarks; 
                     correctCount++;
                 } else {
-                    score -= 0.25; // Negative marking
+                    score -= 0.25; 
                     wrongCount++;
                 }
             }
@@ -65,11 +78,10 @@ export async function POST(req, { params }) {
 
     if (score < 0) score = 0;
 
-    // 3. Save Result
     const newResult = await Result.create({
         testId: id,
         studentId: userId,
-        courseId: test.courseId, // Included courseId for fix-results safety
+        courseId: test.courseId,
         score,
         totalMarks: test.totalMarks,
         answers, 
@@ -78,7 +90,6 @@ export async function POST(req, { params }) {
         timeTaken: timeTaken || 0,
     });
 
-    // --- 4. SEND SUCCESS MAIL ---
     try {
         const user = await User.findById(userId);
         if (user && user.email) {
@@ -104,10 +115,9 @@ export async function POST(req, { params }) {
                 `,
             });
         }
-    } catch (mailError) {
-        // Fail silently so exam submission isn't affected
-    }
+    } catch (mailError) {}
 
+    console.log(`[SUBMIT EXAM DEBUG] ✅ Success! Result Saved.`);
     return NextResponse.json({ 
         success: true, 
         message: "Exam submitted successfully",
@@ -116,6 +126,7 @@ export async function POST(req, { params }) {
     });
 
   } catch (error) {
+    console.error(`[SUBMIT EXAM ERROR]`, error);
     return NextResponse.json({ error: "Submission Failed" }, { status: 500 });
   }
 }

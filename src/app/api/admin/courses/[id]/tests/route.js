@@ -29,8 +29,9 @@ export async function GET(req, { params }) {
 
     const updatedTestsPromise = tests.map(async (test) => {
         const startTime = new Date(test.scheduledAt);
-        const durationMs = (test.duration || 60) * 60 * 1000;
-        const endTime = new Date(startTime.getTime() + durationMs);
+        // FIX: Exam end time ab validityHours pe depend karega
+        const validityMs = (test.validityHours || 24) * 60 * 60 * 1000;
+        const endTime = new Date(startTime.getTime() + validityMs);
         
         let needsSave = false;
 
@@ -41,8 +42,7 @@ export async function GET(req, { params }) {
             console.log(`🟢 [ADMIN AUTO] Started: ${test.title}`);
         }
 
-        // Auto End Logic
-        // 'live' हो या 'scheduled' (missed exam), अगर टाइम खत्म तो completed
+        // Auto End Logic (Deactivates after validity period)
         if ((test.status === 'live' || test.status === 'scheduled') && now >= endTime) {
             test.status = 'completed';
             needsSave = true;
