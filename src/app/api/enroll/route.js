@@ -44,7 +44,7 @@ export async function GET() {
     );
 
   } catch (error) {
-    console.error("Error fetching user enrollments:", error);
+    // Debugging log removed from here
     return NextResponse.json({ error: "Server Error" }, { status: 500 });
   }
 }

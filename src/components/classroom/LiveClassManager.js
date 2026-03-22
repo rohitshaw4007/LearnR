@@ -38,7 +38,9 @@ export default function LiveClassManager({ courseId }) {
                     toast.success("Resumed live session");
                 }
             }
-        } catch (error) { console.error("Failed to restore session", error); }
+        } catch (error) { 
+            // Debugging log removed from here 
+        }
     };
     checkExistingSession();
   }, [courseId]);
@@ -52,7 +54,9 @@ export default function LiveClassManager({ courseId }) {
         const data = await res.json();
         if (Array.isArray(data)) setMessages(data);
       }
-    } catch (error) { console.error("Chat error", error); }
+    } catch (error) { 
+        // Debugging log removed from here 
+    }
   };
 
   useEffect(() => {
