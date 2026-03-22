@@ -3,12 +3,12 @@ import { useState, useEffect, useCallback, memo } from "react";
 import { 
   ArrowLeft, Save, Plus, Trash2, MoreVertical, 
   Copy, Loader2, AlignLeft, Clock, Award, 
-  AlertTriangle, BarChart3
+  AlertTriangle, BarChart3, Image as ImageIcon, X 
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 // --- MEMOIZED SINGLE QUESTION COMPONENT ---
-const QuestionItem = memo(({ q, index, updateQuestion, updateOption, deleteQuestion, duplicateQuestion }) => {
+const QuestionItem = memo(({ q, index, updateQuestion, updateOption, deleteQuestion, duplicateQuestion, uploadImage }) => {
   const [showMenu, setShowMenu] = useState(false);
 
   const toggleDescription = () => {
@@ -34,7 +34,7 @@ const QuestionItem = memo(({ q, index, updateQuestion, updateOption, deleteQuest
 
        {/* Question Header */}
        <div className="flex gap-4 mb-4">
-          <span className="mt-3 text-sm font-bold text-gray-500 bg-white/5 w-8 h-8 flex items-center justify-center rounded-lg select-none">
+          <span className="mt-3 text-sm font-bold text-gray-500 bg-white/5 w-8 h-8 flex items-center justify-center rounded-lg select-none flex-shrink-0">
             {index + 1}
           </span>
           <div className="flex-1 space-y-3">
@@ -44,6 +44,21 @@ const QuestionItem = memo(({ q, index, updateQuestion, updateOption, deleteQuest
                placeholder="Question"
                className="w-full bg-[#0a0a0a] border-b-2 border-white/10 focus:border-cyan-500 outline-none text-lg p-3 rounded-t-lg transition-colors resize-none field-sizing-content min-h-[60px]"
              />
+
+             {/* IMAGE PREVIEW UI */}
+             {q.imageUrl && (
+                 <div className="relative inline-block mt-2 mb-2 border border-white/10 rounded-lg overflow-hidden bg-[#050505] max-w-xs">
+                     {/* eslint-disable-next-line @next/next/no-img-element */}
+                     <img src={q.imageUrl} alt={`Question ${index+1}`} className="w-full h-auto max-h-[200px] object-contain" />
+                     <button 
+                        onClick={() => updateQuestion(index, 'imageUrl', null)}
+                        className="absolute top-2 right-2 p-1.5 bg-red-500/80 hover:bg-red-500 rounded-md text-white transition-colors shadow-lg backdrop-blur-sm"
+                        title="Remove Image"
+                     >
+                        <X size={14} />
+                     </button>
+                 </div>
+             )}
              
              {q.showDescription && (
                 <input 
@@ -90,6 +105,17 @@ const QuestionItem = memo(({ q, index, updateQuestion, updateOption, deleteQuest
                 className="w-14 bg-[#0a0a0a] border border-white/10 rounded px-2 py-1 text-center text-sm focus:border-cyan-500 outline-none text-white"
               />
            </div>
+
+           {/* IMAGE UPLOAD BUTTON */}
+           <label className="text-gray-500 hover:text-cyan-400 transition-colors cursor-pointer mr-1" title="Add Image">
+              <ImageIcon size={18}/>
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                onChange={(e) => uploadImage(index, e.target.files[0])} 
+              />
+           </label>
            
            <button onClick={() => duplicateQuestion(index)} className="text-gray-500 hover:text-white transition-colors" title="Duplicate"><Copy size={18}/></button>
            <button onClick={handleDelete} className="text-gray-500 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={18}/></button>
@@ -169,6 +195,34 @@ export default function MCQEditor({ testId, onBack }) {
     fetchTest();
   }, [testId, onBack]);
 
+  // IMAGE UPLOAD HANDLER
+  const uploadImage = useCallback(async (index, file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.error("Only images allowed");
+    if (file.size > 2 * 1024 * 1024) return toast.error("Image must be under 2MB");
+
+    const loadingToast = toast.loading(`Uploading image...`);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+
+        setQuestions(prev => {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], imageUrl: data.url };
+            return updated;
+        });
+        toast.dismiss(loadingToast);
+        toast.success(`Image added!`);
+    } catch (error) {
+        toast.dismiss(loadingToast);
+        toast.error(error.message);
+    }
+  }, []);
+
   // HANDLERS
   const addQuestion = useCallback(() => {
     if (usedMarks >= testDetails.totalMarks && testDetails.totalMarks > 0) {
@@ -178,6 +232,7 @@ export default function MCQEditor({ testId, onBack }) {
     const newQ = {
       _id: `new_${Date.now()}`, // Temporary ID
       questionText: "",
+      imageUrl: null, // Image field initialized
       description: "",
       showDescription: false,
       options: ["", "", "", ""],
@@ -231,7 +286,7 @@ export default function MCQEditor({ testId, onBack }) {
     });
   }, [usedMarks, testDetails.totalMarks]);
 
-  // --- SAVE HANDLER (THE FIX IS HERE) ---
+  // --- SAVE HANDLER ---
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -242,11 +297,8 @@ export default function MCQEditor({ testId, onBack }) {
           const { _id, showDescription, ...rest } = q;
           
           // Check if ID is a temporary string (contains underscore 'new_', 'dup_')
-          // MongoDB ObjectIds are 24 chars hex. Our temp IDs are like 'new_172...'
           const isTempId = typeof _id === 'string' && (_id.includes('_') || _id.length < 24);
           
-          // If temp ID, don't send it. MongoDB will create a new valid ObjectId.
-          // If valid ID, keep it to update existing question.
           return isTempId ? rest : { ...rest, _id };
       });
 
@@ -311,7 +363,7 @@ export default function MCQEditor({ testId, onBack }) {
     <div className="min-h-screen bg-[#050505] text-white pb-40 animate-in fade-in duration-300">
       
       {/* Sticky Header */}
-      <div className="sticky top-0 z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 py-3 px-4 md:px-8 flex justify-between items-center shadow-md">
+      <div className="sticky top-[60px] md:top-[80px] z-40 bg-[#050505]/90 backdrop-blur-md border-b border-white/5 py-3 px-4 md:px-8 flex justify-between items-center shadow-md">
          <div className="flex items-center gap-4">
             <button onClick={onBack} className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white">
                 <ArrowLeft size={20} />
@@ -344,7 +396,7 @@ export default function MCQEditor({ testId, onBack }) {
                className="flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-black px-6 py-2 rounded-full font-bold text-sm transition-all shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.5)] disabled:opacity-50 disabled:shadow-none"
              >
                 {saving ? <Loader2 size={18} className="animate-spin"/> : <Save size={18} />}
-                <span>Save Paper</span>
+                <span className="hidden md:inline">Save Paper</span>
              </button>
          </div>
       </div>
@@ -442,6 +494,7 @@ export default function MCQEditor({ testId, onBack }) {
                    updateOption={updateOption}
                    deleteQuestion={deleteQuestion}
                    duplicateQuestion={duplicateQuestion}
+                   uploadImage={uploadImage}
                 />
              ))}
          </div>

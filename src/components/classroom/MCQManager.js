@@ -14,19 +14,34 @@ import MCQEditor from "./MCQEditor";
 import TestAnalyticsDashboard from "./TestAnalyticsDashboard"; 
 import LiveExamMonitor from "./LiveExamMonitor";
 
+// --- PDF HELPER FOR IMAGES ---
+const getBase64Image = (url) => {
+    return new Promise((resolve, reject) => {
+        const img = new window.Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            resolve({ dataURL: canvas.toDataURL('image/jpeg'), width: img.width, height: img.height });
+        };
+        img.onerror = reject;
+        img.src = url;
+    });
+};
+
 export default function MCQManager({ courseId, onBack }) {
-  // --- STATES ---
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tests, setTests] = useState([]);
   const [search, setSearch] = useState("");
   
-  // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false); 
   
-  // Selection States
   const [selectedTestId, setSelectedTestId] = useState(null);
   const [selectedAnalyticsTestId, setSelectedAnalyticsTestId] = useState(null); 
   const [selectedLiveTestId, setSelectedLiveTestId] = useState(null); 
@@ -35,7 +50,6 @@ export default function MCQManager({ courseId, onBack }) {
   const [selectedTestForPreview, setSelectedTestForPreview] = useState(null); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Form State (Added validityHours: 24 as default)
   const [formData, setFormData] = useState({
     title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, validityHours: 24, totalMarks: 100, isManualStart: false,
   });
@@ -48,7 +62,6 @@ export default function MCQManager({ courseId, onBack }) {
           setTests(data);
       }
     } catch (error) {
-      console.error(error);
       toast.error("Failed to load tests");
     } finally {
       setLoading(false);
@@ -74,7 +87,6 @@ export default function MCQManager({ courseId, onBack }) {
       toast.success("Exam Draft Created!");
       setIsModalOpen(false);
       setSelectedTestId(data._id);
-      // Reset Form
       setFormData({ title: "", description: "", scheduledDate: "", scheduledTime: "", duration: 60, validityHours: 24, totalMarks: 100, isManualStart: false });
     } catch (error) {
       toast.error(error.message);
@@ -117,9 +129,12 @@ export default function MCQManager({ courseId, onBack }) {
       } catch(err) { toast.error("Error deleting exam"); }
   };
 
+  // --- PDF GENERATOR WTIH IMAGES ---
   const generatePDF = async (type) => {
     if (!selectedTestForDownload) return;
     setIsDownloading(true);
+    const loadingToast = toast.loading("Compiling Paper with Images...");
+
     try {
         let testData = selectedTestForDownload;
         if(!testData.questions || testData.questions.length === 0) {
@@ -156,15 +171,20 @@ export default function MCQManager({ courseId, onBack }) {
         doc.setLineWidth(0.5);
         doc.line(12, 42, pageWidth - 12, 42);
 
-        // Questions
+        // Questions Loop
         let yPos = 50;
-        testData.questions?.forEach((q, index) => {
-            if (yPos > pageHeight - 25) {
+        
+        for (let index = 0; index < testData.questions?.length; index++) {
+            const q = testData.questions[index];
+            
+            if (yPos > pageHeight - 30) {
                 doc.addPage();
                 yPos = 15;
                 doc.setFillColor(255, 204, 0); 
                 doc.rect(0, 0, pageWidth, 3, 'F');
             }
+            
+            // Question Text
             doc.setFont("times", "bold");
             doc.setFontSize(10); 
             doc.setTextColor(0, 0, 0);
@@ -173,6 +193,30 @@ export default function MCQManager({ courseId, onBack }) {
             doc.text(splitTitle, 12, yPos);
             yPos += (splitTitle.length * 4.5) + 2; 
 
+            // IMAGE LOGIC IN PDF
+            if (q.imageUrl) {
+                try {
+                    const imgObj = await getBase64Image(q.imageUrl);
+                    const maxW = pageWidth - 40; // Max width inside PDF
+                    const maxH = 60; // Max height
+                    const ratio = Math.min(maxW / imgObj.width, maxH / imgObj.height);
+                    const w = imgObj.width * ratio;
+                    const h = imgObj.height * ratio;
+
+                    if (yPos + h > pageHeight - 20) {
+                        doc.addPage();
+                        yPos = 15;
+                    }
+                    
+                    const xOffset = 16; // Slight indent
+                    doc.addImage(imgObj.dataURL, 'JPEG', xOffset, yPos, w, h);
+                    yPos += h + 4; // Add space after image
+                } catch (err) {
+                    console.error("Failed to load PDF image", err);
+                }
+            }
+
+            // Options
             doc.setFont("helvetica", "normal");
             doc.setFontSize(9); 
             doc.setTextColor(20, 20, 20);
@@ -193,6 +237,7 @@ export default function MCQManager({ courseId, onBack }) {
                 });
             }
 
+            // Solutions
             if (type === 'solution') {
                 yPos += 1;
                 doc.setFillColor(255, 250, 225); 
@@ -215,8 +260,9 @@ export default function MCQManager({ courseId, onBack }) {
             } else {
                 yPos += 3;
             }
-        });
+        }
 
+        // Pagination Footer
         const pageCount = doc.internal.getNumberOfPages();
         for(let i = 1; i <= pageCount; i++) {
             doc.setPage(i);
@@ -225,11 +271,14 @@ export default function MCQManager({ courseId, onBack }) {
             doc.text(`${i}/${pageCount}`, pageWidth - 15, pageHeight - 10);
             doc.text("LearnR Academy", pageWidth / 2, pageHeight - 10, { align: 'center' });
         }
+        
         doc.save(`${testData.title.replace(/\s+/g, '_')}_${type}.pdf`);
-        toast.success("PDF Downloaded!");
+        toast.dismiss(loadingToast);
+        toast.success("PDF Downloaded with Images!");
         setDownloadModalOpen(false);
     } catch (error) {
         console.error(error);
+        toast.dismiss(loadingToast);
         toast.error("Failed to generate PDF");
     } finally {
         setIsDownloading(false);
@@ -365,7 +414,7 @@ export default function MCQManager({ courseId, onBack }) {
          )}
       </div>
 
-      {/* CREATE MODAL (UPDATED WITH 3 COLUMNS AND VALIDITY FIELD) */}
+      {/* CREATE MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
            <div className="bg-[#111] border border-white/10 w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl">
@@ -375,13 +424,11 @@ export default function MCQManager({ courseId, onBack }) {
               </div>
               <form onSubmit={handleCreate} className="p-6 space-y-5">
                  
-                 {/* Title Input */}
                  <div>
                     <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Exam Title</label>
                     <input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" placeholder="Enter exam title..."/>
                  </div>
                  
-                 {/* Date & Time Inputs */}
                  <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Scheduled Date</label>
@@ -393,7 +440,6 @@ export default function MCQManager({ courseId, onBack }) {
                     </div>
                  </div>
 
-                 {/* NEW: Duration, Validity & Marks Inputs */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Duration (Mins)</label>
@@ -409,7 +455,6 @@ export default function MCQManager({ courseId, onBack }) {
                     </div>
                  </div>
 
-                 {/* Manual Start Mode */}
                  <div className="flex items-center gap-3 p-3 bg-yellow-900/10 border border-yellow-500/20 rounded-lg cursor-pointer hover:bg-yellow-900/20 transition-colors" onClick={() => setFormData({...formData, isManualStart: !formData.isManualStart})}>
                     <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${formData.isManualStart ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500 bg-black'}`}>
                         {formData.isManualStart && <CheckSquare size={14} className="text-black"/>}
@@ -443,7 +488,7 @@ export default function MCQManager({ courseId, onBack }) {
                     <div className="space-y-4">
                         <button onClick={() => generatePDF('question_paper')} disabled={isDownloading} className="w-full group/btn relative flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-[#121212] hover:border-yellow-500 hover:bg-yellow-950/20 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]">
                             <div className="w-12 h-12 rounded-xl bg-gray-900 group-hover/btn:bg-yellow-500 group-hover/btn:text-black text-gray-400 flex items-center justify-center transition-all duration-300 border border-white/5"><FileText size={20} strokeWidth={2.5}/></div>
-                            <div className="text-left flex-1"><p className="text-white font-bold text-lg group-hover/btn:text-yellow-400 transition-colors">Question Paper</p><p className="text-[11px] text-gray-500 uppercase tracking-wide">Questions Only</p></div>
+                            <div className="text-left flex-1"><p className="text-white font-bold text-lg group-hover/btn:text-yellow-400 transition-colors">Question Paper</p><p className="text-[11px] text-gray-500 uppercase tracking-wide">With Embedded Images</p></div>
                             {isDownloading && <Loader2 className="animate-spin text-yellow-500"/>}
                         </button>
                         <button onClick={() => generatePDF('solution')} disabled={isDownloading} className="w-full group/btn relative flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-[#121212] hover:border-green-500 hover:bg-green-950/20 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]">
@@ -501,7 +546,16 @@ export default function MCQManager({ courseId, onBack }) {
                                     <div className="flex justify-between items-start mb-6">
                                         <div className="flex gap-4">
                                             <span className="text-yellow-500 font-black text-xl md:text-2xl mt-0.5 shadow-black drop-shadow-lg">Q{idx + 1}.</span>
-                                            <h3 className="text-xl md:text-2xl font-bold text-gray-100 leading-relaxed font-sans">{q.questionText}</h3>
+                                            <div className="flex-1">
+                                                <h3 className="text-xl md:text-2xl font-bold text-gray-100 leading-relaxed font-sans">{q.questionText}</h3>
+                                                
+                                                {/* NEW: IMAGE PREVIEW IN ADMIN MODAL */}
+                                                {q.imageUrl && (
+                                                    <div className="mt-4 mb-2 rounded-xl overflow-hidden border border-white/10 bg-black/50 p-2 inline-block shadow-[0_0_15px_rgba(234,179,8,0.05)]">
+                                                        <img src={q.imageUrl} alt="Question" className="max-w-full max-h-[300px] object-contain rounded-lg"/>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="space-y-3 pl-0 md:pl-10">

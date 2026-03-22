@@ -22,7 +22,6 @@ export default function ExamPortalPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
 
-  // FIX: Load saved answers from LocalStorage on mount
   useEffect(() => {
     if (testId) {
         const savedAnswers = localStorage.getItem(`exam_${testId}_answers`);
@@ -32,7 +31,6 @@ export default function ExamPortalPage() {
     }
   }, [testId]);
 
-  // FIX: Save answer to LocalStorage on change
   const handleAnswerSelect = (qIndex, optIndex) => {
     setAnswers(prev => {
         const newAnswers = { ...prev, [qIndex]: optIndex };
@@ -50,7 +48,6 @@ export default function ExamPortalPage() {
     });
   };
 
-  // Security: Full Screen & Tab Detection
   useEffect(() => {
     if (loading || error) return; 
 
@@ -68,11 +65,7 @@ export default function ExamPortalPage() {
     };
 
     const enterFullScreen = async () => {
-        try {
-            await document.documentElement.requestFullscreen();
-        } catch (e) {
-            // Ignored
-        }
+        try { await document.documentElement.requestFullscreen(); } catch (e) {}
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -88,7 +81,6 @@ export default function ExamPortalPage() {
     };
   }, [warnings, loading, error]);
 
-  // Fetch Exam Data
   useEffect(() => {
     const startExam = async () => {
       try {
@@ -108,13 +100,8 @@ export default function ExamPortalPage() {
             return;
         }
 
-        if (!res.ok) {
-           throw new Error(data.error || `Server Error: ${res.statusText}`);
-        }
-
-        if (!data.test || !data.test.questions) {
-            throw new Error("Exam data is empty or invalid.");
-        }
+        if (!res.ok) throw new Error(data.error || `Server Error: ${res.statusText}`);
+        if (!data.test || !data.test.questions) throw new Error("Exam data is empty or invalid.");
 
         setTest(data.test);
         setQuestions(data.test.questions);
@@ -131,7 +118,6 @@ export default function ExamPortalPage() {
     if (testId) startExam();
   }, [testId, router]);
 
-  // Timer Logic
   useEffect(() => {
     if (!loading && !error && timeLeft > 0) {
       const timer = setInterval(() => {
@@ -156,7 +142,7 @@ export default function ExamPortalPage() {
   };
 
   const handleSubmit = async (auto = false) => {
-      if(isSubmitting) return; // FIX: Prevent Double Click
+      if(isSubmitting) return; 
       if(!auto && !confirm("Are you sure you want to submit?")) return;
       
       setIsSubmitting(true);
@@ -171,7 +157,6 @@ export default function ExamPortalPage() {
           });
           
           if(res.ok) {
-              // FIX: Clear LocalStorage on Success
               localStorage.removeItem(`exam_${testId}_answers`);
               toast.dismiss(loadingToast);
               toast.success("Exam Submitted Successfully!");
@@ -272,7 +257,7 @@ export default function ExamPortalPage() {
                                 <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none -mr-32 -mt-32"></div>
 
                                 {/* Question Header */}
-                                <div className="flex justify-between items-start mb-4 md:mb-8 relative z-10">
+                                <div className="flex justify-between items-start mb-4 md:mb-6 relative z-10">
                                     <h2 className="text-base md:text-2xl font-bold text-gray-100 leading-relaxed pr-2">
                                         <span className="text-cyan-500 mr-2 md:mr-3 text-xl md:text-3xl font-black">Q{currentQIndex + 1}</span>
                                         {currentQ.questionText}
@@ -281,6 +266,16 @@ export default function ExamPortalPage() {
                                         {currentQ.marks || 1} Marks
                                     </span>
                                 </div>
+
+                                {/* --- NEW: IMAGE VIEWER IN EXAM --- */}
+                                {currentQ.imageUrl && (
+                                    <div className="mb-8 relative z-10 flex justify-center">
+                                        <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/50 p-2 max-w-full inline-block shadow-[0_0_20px_rgba(6,182,212,0.1)]">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={currentQ.imageUrl} alt="Question Diagram" className="max-w-full max-h-[30vh] md:max-h-[40vh] object-contain rounded-lg" />
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Options Grid */}
                                 <div className="grid gap-3 md:gap-4 pl-0 md:pl-4 relative z-10">
@@ -361,7 +356,7 @@ export default function ExamPortalPage() {
                     <div className="grid grid-cols-4 md:grid-cols-4 gap-3">
                         {questions.map((_, idx) => {
                             const isCurr = currentQIndex === idx;
-                            const hasAns = answers[idx] !== undefined;
+                            const hasAns = answers[idx] !== undefined && answers[idx] !== -1;
                             const isMarked = markedForReview[idx];
                             
                             return (
