@@ -12,7 +12,7 @@ import jsPDF from "jspdf";
 // IMPORT THE COMPONENTS
 import MCQEditor from "./MCQEditor";
 import TestAnalyticsDashboard from "./TestAnalyticsDashboard"; 
-import LiveExamMonitor from "./LiveExamMonitor"; // <--- 1. NEW IMPORT
+import LiveExamMonitor from "./LiveExamMonitor";
 
 export default function MCQManager({ courseId, onBack }) {
   // --- STATES ---
@@ -29,7 +29,7 @@ export default function MCQManager({ courseId, onBack }) {
   // Selection States
   const [selectedTestId, setSelectedTestId] = useState(null); // For Editor (Draft/Scheduled)
   const [selectedAnalyticsTestId, setSelectedAnalyticsTestId] = useState(null); // For Analytics (Completed)
-  const [selectedLiveTestId, setSelectedLiveTestId] = useState(null); // <--- 2. NEW STATE FOR LIVE
+  const [selectedLiveTestId, setSelectedLiveTestId] = useState(null); // For Live Monitor
   
   const [selectedTestForDownload, setSelectedTestForDownload] = useState(null); 
   const [selectedTestForPreview, setSelectedTestForPreview] = useState(null); 
@@ -61,9 +61,6 @@ export default function MCQManager({ courseId, onBack }) {
     if(courseId && !selectedTestId && !selectedAnalyticsTestId && !selectedLiveTestId) fetchTests(); 
   }, [courseId, selectedTestId, selectedAnalyticsTestId, selectedLiveTestId]);
 
-  // ... (handleCreate, toggleStatus, handleDelete, generatePDF functions same rahenge) ...
-  // (Main code ki baki functions me koi change nahi hai, unhe waisa hi rakhein)
-  
   // 2. CREATE TEST HANDLER
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -257,7 +254,7 @@ export default function MCQManager({ courseId, onBack }) {
   };
 
 
-  // --- RENDER CONDITION (UPDATED) ---
+  // --- RENDER CONDITION ---
   if (selectedTestId) {
     return <MCQEditor testId={selectedTestId} onBack={() => setSelectedTestId(null)} />;
   }
@@ -266,7 +263,6 @@ export default function MCQManager({ courseId, onBack }) {
     return <TestAnalyticsDashboard testId={selectedAnalyticsTestId} onBack={() => setSelectedAnalyticsTestId(null)} />;
   }
 
-  // 3. New Condition for LIVE Page
   if (selectedLiveTestId) {
     return <LiveExamMonitor 
               testId={selectedLiveTestId} 
@@ -279,7 +275,6 @@ export default function MCQManager({ courseId, onBack }) {
 
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-      {/* ... (Header aur Back button code same rahega) ... */}
       <button onClick={onBack} className="mb-6 flex items-center text-gray-400 hover:text-white transition-colors text-sm font-medium">
         <ArrowLeft size={16} className="mr-2"/> Back to Selection
       </button>
@@ -330,14 +325,13 @@ export default function MCQManager({ courseId, onBack }) {
                       )}
                    </div>
                    
-                   {/* 4. UPDATED CLICK HANDLER LOGIC */}
                    <div onClick={() => {
                         if (test.status === 'live') {
-                            setSelectedLiveTestId(test._id); // <--- OPEN LIVE MONITOR
+                            setSelectedLiveTestId(test._id); 
                         } else if (test.status === 'completed') {
-                            setSelectedAnalyticsTestId(test._id); // OPEN ANALYTICS
+                            setSelectedAnalyticsTestId(test._id); 
                         } else {
-                            setSelectedTestId(test._id); // OPEN EDITOR (Draft/Scheduled)
+                            setSelectedTestId(test._id); 
                         }
                    }}>
                         <h3 className="text-xl font-bold text-gray-100 mb-2 group-hover:text-yellow-400 transition-colors line-clamp-1 pr-20">{test.title}</h3>
@@ -368,7 +362,6 @@ export default function MCQManager({ courseId, onBack }) {
                              </button>
                          )}
                          
-                         {/* Live Stop Button in Card (optional now since page has it too) */}
                          {test.status === 'live' && (
                              <button onClick={(e) => { e.stopPropagation(); toggleStatus(test._id, 'completed'); }} className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors"><StopCircle size={18} /></button>
                          )}
@@ -381,7 +374,7 @@ export default function MCQManager({ courseId, onBack }) {
          )}
       </div>
 
-      {/* CREATE MODAL */}
+      {/* CREATE MODAL (UPDATED WITH LABELS) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
            <div className="bg-[#111] border border-white/10 w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl">
@@ -389,23 +382,52 @@ export default function MCQManager({ courseId, onBack }) {
                  <h2 className="text-lg font-bold text-white">Create New Quiz</h2>
                  <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
               </div>
-              <form onSubmit={handleCreate} className="p-6 space-y-4">
-                 <input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" placeholder="Exam Title"/>
-                 <div className="grid grid-cols-2 gap-4">
-                    <input type="date" required value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} className="bg-black border border-white/10 rounded-lg p-3 text-white outline-none"/>
-                    <input type="time" required value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} className="bg-black border border-white/10 rounded-lg p-3 text-white outline-none"/>
+              <form onSubmit={handleCreate} className="p-6 space-y-5">
+                 
+                 {/* Title Input */}
+                 <div>
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Exam Title</label>
+                    <input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" placeholder="Enter exam title..."/>
                  </div>
+                 
+                 {/* Date & Time Inputs */}
                  <div className="grid grid-cols-2 gap-4">
-                    <input type="number" placeholder="Duration (min)" value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} className="bg-black border border-white/10 rounded-lg p-3 text-white outline-none"/>
-                    <input type="number" placeholder="Total Marks" value={formData.totalMarks} onChange={e => setFormData({...formData, totalMarks: e.target.value})} className="bg-black border border-white/10 rounded-lg p-3 text-white outline-none"/>
+                    <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Scheduled Date</label>
+                        <input type="date" required value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                    </div>
+                    <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Scheduled Time</label>
+                        <input type="time" required value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                    </div>
                  </div>
-                 <div className="flex items-center gap-3 p-3 bg-yellow-900/10 border border-yellow-500/20 rounded-lg cursor-pointer" onClick={() => setFormData({...formData, isManualStart: !formData.isManualStart})}>
-                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${formData.isManualStart ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500'}`}>
+
+                 {/* Duration & Marks Inputs */}
+                 <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Duration (Mins)</label>
+                        <input type="number" min="1" required value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                    </div>
+                    <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Total Marks</label>
+                        <input type="number" min="1" required value={formData.totalMarks} onChange={e => setFormData({...formData, totalMarks: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                    </div>
+                 </div>
+
+                 {/* Manual Start Mode */}
+                 <div className="flex items-center gap-3 p-3 bg-yellow-900/10 border border-yellow-500/20 rounded-lg cursor-pointer hover:bg-yellow-900/20 transition-colors" onClick={() => setFormData({...formData, isManualStart: !formData.isManualStart})}>
+                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${formData.isManualStart ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500 bg-black'}`}>
                         {formData.isManualStart && <CheckSquare size={14} className="text-black"/>}
                     </div>
-                    <div><p className="text-sm font-bold text-yellow-100">Manual Start Mode</p></div>
+                    <div>
+                        <p className="text-sm font-bold text-yellow-100">Manual Start Mode</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">Start the exam manually regardless of scheduled time.</p>
+                    </div>
                  </div>
-                 <button type="submit" disabled={isSubmitting} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl mt-4 flex justify-center items-center gap-2">{isSubmitting ? <Loader2 className="animate-spin" size={20}/> : "Create & Start Editing"}</button>
+
+                 <button type="submit" disabled={isSubmitting} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3.5 rounded-xl mt-2 flex justify-center items-center gap-2 transition-colors active:scale-[0.98]">
+                    {isSubmitting ? <Loader2 className="animate-spin" size={20}/> : "Create & Start Editing"}
+                 </button>
               </form>
            </div>
         </div>
