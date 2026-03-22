@@ -38,7 +38,18 @@ export async function GET(req, { params }) {
         };
     });
 
-    return NextResponse.json({ success: true, tests: processedTests });
+    // FIX: Added Strict Cache-Control
+    return NextResponse.json(
+      { success: true, tests: processedTests },
+      {
+        status: 200,
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        }
+      }
+    );
 
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

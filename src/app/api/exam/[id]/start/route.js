@@ -12,6 +12,7 @@ export async function GET(req, { params }) {
     await connectDB();
     const { id } = await params;
     
+    // Security: correctOption is hidden from frontend
     const test = await Test.findById(id).select("-questions.correctOption"); 
     if (!test) return NextResponse.json({ error: "Exam not found" }, { status: 404 });
 
@@ -49,10 +50,20 @@ export async function GET(req, { params }) {
         return NextResponse.json({ error: "You have already submitted this exam." }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, test });
+    // FIX: Add No-Cache Headers
+    return NextResponse.json(
+      { success: true, test },
+      {
+        status: 200,
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        }
+      }
+    );
 
   } catch (error) {
-    console.error("Exam Start Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

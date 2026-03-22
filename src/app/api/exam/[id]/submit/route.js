@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Test from "@/models/Test";
 import Result from "@/models/Result";
-import User from "@/models/User"; // User model import kiya
+import User from "@/models/User"; 
 import { getDataFromToken } from "@/lib/getDataFromToken";
-import nodemailer from "nodemailer"; // Nodemailer import kiya
+import nodemailer from "nodemailer"; 
 
 export async function POST(req, { params }) {
   try {
@@ -14,6 +14,12 @@ export async function POST(req, { params }) {
 
     const userId = await getDataFromToken(req);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // FIX 1: Double Submission Check - Agar pehle submit kiya hai toh dobara save na kare
+    const existingResult = await Result.findOne({ testId: id, studentId: userId });
+    if (existingResult) {
+        return NextResponse.json({ error: "Exam already submitted" }, { status: 400 });
+    }
 
     // 1. Fetch Original Test
     const test = await Test.findById(id);
@@ -31,7 +37,7 @@ export async function POST(req, { params }) {
         }, { status: 400 });
     }
 
-    // 2. Calculate Score (STRICT LOGIC)
+    // 2. Calculate Score (STRICT LOGIC FIX)
     let score = 0;
     let correctCount = 0;
     let wrongCount = 0;
@@ -39,7 +45,7 @@ export async function POST(req, { params }) {
     test.questions.forEach((q, index) => {
         const userAns = answers[index];
         const correctAns = q.correctOption;
-        const questionMarks = q.marks || 1; 
+        const questionMarks = parseFloat(q.marks) || 1; // Strict Number parsing
 
         if (userAns !== undefined && userAns !== null && parseInt(userAns) !== -1) {
             const userAnsInt = parseInt(userAns);
@@ -50,7 +56,7 @@ export async function POST(req, { params }) {
                     score += questionMarks; 
                     correctCount++;
                 } else {
-                    score -= 0.25; 
+                    score -= 0.25; // Negative marking
                     wrongCount++;
                 }
             }
@@ -63,6 +69,7 @@ export async function POST(req, { params }) {
     const newResult = await Result.create({
         testId: id,
         studentId: userId,
+        courseId: test.courseId, // Included courseId for fix-results safety
         score,
         totalMarks: test.totalMarks,
         answers, 
@@ -71,7 +78,7 @@ export async function POST(req, { params }) {
         timeTaken: timeTaken || 0,
     });
 
-    // --- 4. SEND SUCCESS MAIL (NEW FEATURE) ---
+    // --- 4. SEND SUCCESS MAIL ---
     try {
         const user = await User.findById(userId);
         if (user && user.email) {
@@ -98,7 +105,6 @@ export async function POST(req, { params }) {
             });
         }
     } catch (mailError) {
-        console.error("Mail sending failed:", mailError);
         // Fail silently so exam submission isn't affected
     }
 
@@ -110,7 +116,6 @@ export async function POST(req, { params }) {
     });
 
   } catch (error) {
-    console.error("Submission Error:", error);
     return NextResponse.json({ error: "Submission Failed" }, { status: 500 });
   }
 }

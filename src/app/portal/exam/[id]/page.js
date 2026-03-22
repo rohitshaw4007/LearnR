@@ -22,6 +22,34 @@ export default function ExamPortalPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
 
+  // FIX: Load saved answers from LocalStorage on mount
+  useEffect(() => {
+    if (testId) {
+        const savedAnswers = localStorage.getItem(`exam_${testId}_answers`);
+        if (savedAnswers) {
+            try { setAnswers(JSON.parse(savedAnswers)); } catch(e){}
+        }
+    }
+  }, [testId]);
+
+  // FIX: Save answer to LocalStorage on change
+  const handleAnswerSelect = (qIndex, optIndex) => {
+    setAnswers(prev => {
+        const newAnswers = { ...prev, [qIndex]: optIndex };
+        localStorage.setItem(`exam_${testId}_answers`, JSON.stringify(newAnswers));
+        return newAnswers;
+    });
+  };
+
+  const clearAnswer = (qIndex) => {
+    setAnswers(prev => {
+        const newAnswers = { ...prev };
+        delete newAnswers[qIndex];
+        localStorage.setItem(`exam_${testId}_answers`, JSON.stringify(newAnswers));
+        return newAnswers;
+    });
+  };
+
   // Security: Full Screen & Tab Detection
   useEffect(() => {
     if (loading || error) return; 
@@ -43,7 +71,7 @@ export default function ExamPortalPage() {
         try {
             await document.documentElement.requestFullscreen();
         } catch (e) {
-            console.log("Fullscreen denied/cancelled");
+            // Ignored
         }
     };
 
@@ -63,8 +91,6 @@ export default function ExamPortalPage() {
   // Fetch Exam Data
   useEffect(() => {
     const startExam = async () => {
-      console.log("🚀 Client: Starting Exam Fetch for ID:", testId); 
-
       try {
         const res = await fetch(`/api/exam/${testId}/start`);
         let data;
@@ -72,7 +98,7 @@ export default function ExamPortalPage() {
         if (contentType && contentType.includes("application/json")) {
             data = await res.json();
         } else {
-            throw new Error("Invalid Server Response (Not JSON)");
+            throw new Error("Invalid Server Response");
         }
 
         if (res.status === 401) {
@@ -97,7 +123,6 @@ export default function ExamPortalPage() {
         setLoading(false);
 
       } catch (error) {
-        console.error("🔥 Client Error:", error);
         setError(error.message); 
         setLoading(false);
       }
@@ -131,8 +156,12 @@ export default function ExamPortalPage() {
   };
 
   const handleSubmit = async (auto = false) => {
+      if(isSubmitting) return; // FIX: Prevent Double Click
       if(!auto && !confirm("Are you sure you want to submit?")) return;
+      
       setIsSubmitting(true);
+      const loadingToast = toast.loading("Submitting your exam...");
+
       try {
           const answersArray = questions.map((_, idx) => answers[idx] !== undefined ? answers[idx] : -1);
           const res = await fetch(`/api/exam/${testId}/submit`, {
@@ -140,20 +169,25 @@ export default function ExamPortalPage() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ answers: answersArray, timeTaken: (test.duration * 60) - timeLeft })
           });
+          
           if(res.ok) {
+              // FIX: Clear LocalStorage on Success
+              localStorage.removeItem(`exam_${testId}_answers`);
+              toast.dismiss(loadingToast);
               toast.success("Exam Submitted Successfully!");
               router.replace(`/dashboard/classroom/${test.courseId}/tests/${testId}/result`);
           } else {
-              toast.error("Submission Failed");
+              const data = await res.json();
+              toast.dismiss(loadingToast);
+              toast.error(data.error || "Submission Failed. Try again.");
               setIsSubmitting(false);
           }
       } catch (error) {
-          toast.error("Network Error");
+          toast.dismiss(loadingToast);
+          toast.error("Network Error. Your answers are saved locally. Please click submit again.");
           setIsSubmitting(false);
       }
   };
-
-  // --- RENDERING STATES ---
 
   if (loading) return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-6">
@@ -185,7 +219,7 @@ export default function ExamPortalPage() {
   return (
     <div className="fixed inset-0 bg-[#030303] text-white flex flex-col overflow-hidden font-sans select-none">
         
-        {/* HEADER (Mobile Compact) */}
+        {/* HEADER */}
         <header className="h-14 md:h-16 bg-[#080808] border-b border-white/5 flex items-center justify-between px-3 md:px-6 z-20 shadow-[0_5px_20px_rgba(0,0,0,0.5)]">
             <div className="flex items-center gap-3 md:gap-4">
                 <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.5)]">
@@ -255,7 +289,7 @@ export default function ExamPortalPage() {
                                         return (
                                             <div 
                                                 key={idx}
-                                                onClick={() => setAnswers(prev => ({ ...prev, [currentQIndex]: idx }))}
+                                                onClick={() => handleAnswerSelect(currentQIndex, idx)}
                                                 className={`
                                                     group relative flex items-center gap-3 md:gap-5 p-3 md:p-5 rounded-xl md:rounded-2xl border cursor-pointer transition-all duration-300 active:scale-[0.98]
                                                     ${isSelected 
@@ -276,7 +310,7 @@ export default function ExamPortalPage() {
                     </div>
                 </div>
 
-                {/* BOTTOM CONTROLS (App Style) */}
+                {/* BOTTOM CONTROLS */}
                 <div className="h-16 md:h-24 bg-[#080808] border-t border-white/5 flex items-center justify-between px-4 md:px-12 z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.5)] safe-area-bottom">
                     
                     {/* Left: Tools */}
@@ -287,7 +321,7 @@ export default function ExamPortalPage() {
                             <Flag size={18} fill={markedForReview[currentQIndex] ? "currentColor" : "none"}/>
                             <span className="hidden md:inline">Review</span>
                         </button>
-                        <button onClick={() => { const n={...answers}; delete n[currentQIndex]; setAnswers(n); }} 
+                        <button onClick={() => clearAnswer(currentQIndex)} 
                             className="p-3 md:px-5 md:py-3 rounded-xl font-bold text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all">
                             <RotateCcw size={18}/> <span className="hidden md:inline">Reset</span>
                         </button>
@@ -303,8 +337,8 @@ export default function ExamPortalPage() {
                         
                         {currentQIndex === questions.length - 1 ? (
                              <button onClick={() => handleSubmit(false)} disabled={isSubmitting} 
-                                className="px-5 py-2.5 md:px-10 md:py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 active:scale-95 text-white font-black shadow-[0_0_20px_rgba(34,197,94,0.4)] transition-all flex items-center gap-2 text-xs md:text-base">
-                                {isSubmitting ? '...' : 'SUBMIT'} <CheckCircle size={16} className="md:w-5 md:h-5"/>
+                                className="px-5 py-2.5 md:px-10 md:py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 hover:scale-105 active:scale-95 text-white font-black shadow-[0_0_20px_rgba(34,197,94,0.4)] transition-all flex items-center gap-2 text-xs md:text-base disabled:opacity-50 disabled:cursor-not-allowed">
+                                {isSubmitting ? 'Submitting...' : 'SUBMIT'} {!isSubmitting && <CheckCircle size={16} className="md:w-5 md:h-5"/>}
                              </button>
                         ) : (
                             <button onClick={() => setCurrentQIndex(prev => prev + 1)} 
@@ -316,7 +350,7 @@ export default function ExamPortalPage() {
                 </div>
             </main>
 
-            {/* SIDEBAR PALETTE (App Drawer Style) */}
+            {/* SIDEBAR PALETTE */}
             <aside className={`absolute md:relative top-0 right-0 h-full w-72 md:w-80 bg-[#0a0a0a] border-l border-white/5 z-30 transform transition-transform duration-300 ease-out shadow-[-10px_0_30px_rgba(0,0,0,0.8)] ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
                 <div className="p-4 md:p-5 border-b border-white/5 bg-[#0f0f0f] font-bold text-gray-300 text-sm flex items-center justify-between">
                     <span>Question Palette</span>
