@@ -5,93 +5,50 @@ import Result from "@/models/Result";
 import { getDataFromToken } from "@/lib/getDataFromToken";
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(req, { params }) {
   try {
-    console.log("🟢 [API HIT] /api/exam/[id]/result");
-
     await connectDB();
-    
-    // 1. Safe Params Handling
-    const resolvedParams = await params; 
-    const testId = resolvedParams.id;
-
-    if (!testId) {
-        return NextResponse.json({ success: false, message: "Test ID is required" }, { status: 400 });
-    }
-
-    // 2. Auth Check
+    const { id } = await params; // id here is testId
     const userId = await getDataFromToken(req);
-    if (!userId) {
-        return NextResponse.json({ success: false, message: "Unauthorized access" }, { status: 401 });
-    }
 
-    // 3. Find Result
-    const result = await Result.findOne({ testId: testId, studentId: userId });
-    
-    if (!result) {
-      return NextResponse.json({ 
-          success: false, 
-          message: "Result not found. It seems you haven't attempted this test yet." 
-      });
-    }
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // 4. Find Test Details
-    const test = await Test.findById(testId);
-    if (!test) {
-        return NextResponse.json({ success: false, message: "Test Definition not found" });
-    }
+    const result = await Result.findOne({ testId: id, studentId: userId });
+    if (!result) return NextResponse.json({ error: "Result not found" }, { status: 404 });
 
-    // 5. Result Reveal Logic (FIXED)
-    // अगर आप चाहते हैं कि यूजर सबमिट करते ही रिजल्ट देख ले, तो इसे true रखें।
-    // या आप 12 घंटे वाली शर्त हटा दें।
-    const isResultDeclared = true; 
-    
-    // पुराना लॉजिक जिसे हटाया गया (अगर आपको वापस delay चाहिए तो इसे uncomment करें):
-    // const startTime = new Date(test.scheduledAt);
-    // const resultRevealTime = new Date(startTime.getTime() + 12 * 60 * 60 * 1000); 
-    // const now = new Date();
-    // const isResultDeclared = now >= resultRevealTime;
+    const test = await Test.findById(id);
+    if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
-    // 6. Process Questions
-    const processedQuestions = test.questions.map((q, index) => {
-      // Answers array index match logic
-      const answerIndex = result.answers[index];
-      
-      // Handle -1 or null as "Skipped" (null)
-      const selectedOption = (answerIndex !== undefined && answerIndex !== null && answerIndex !== -1) 
-          ? answerIndex 
-          : null;
-
+    // 🛠️ FIX: Ab har question ke sath image aur student ka answer (selectedOption) jayega
+    const mappedQuestions = test.questions.map((q, index) => {
       return {
-        _id: q._id,
         questionText: q.questionText,
+        imageUrl: q.imageUrl || null, // Image Fix
         options: q.options,
-        marks: q.marks,
-        selectedOption: selectedOption, 
-        // अब correctOption हमेशा भेजा जाएगा ताकि "Wrong" न दिखे
-        correctOption: isResultDeclared ? q.correctOption : null, 
-        description: isResultDeclared ? q.description : null,
+        correctOption: q.correctOption,
+        selectedOption: result.answers[index] !== undefined ? result.answers[index] : -1, // Skipped Fix
+        description: q.description || null,
+        marks: q.marks || 1
       };
     });
-
-    console.log("✅ [API] Data prepared successfully.");
 
     return NextResponse.json({
       success: true,
       data: {
         testTitle: test.title,
-        // ✅ FIX: Model में field का नाम 'score' है, 'obtainedMarks' नहीं।
-        obtainedMarks: result.score, 
-        totalMarks: result.totalMarks,
-        isResultDeclared, 
-        revealTime: new Date(), // Immediate reveal
-        questions: processedQuestions
+        studentId: userId,
+        totalMarks: test.totalMarks,
+        obtainedMarks: result.score,
+        correctCount: result.correctCount, // Fix for 0 correct
+        wrongCount: result.wrongCount,     // Fix for 0 wrong
+        submittedAt: result.createdAt,
+        questions: mappedQuestions
       }
     });
-
   } catch (error) {
-    console.error("🔥 [API CRASH]:", error);
-    return NextResponse.json({ success: false, message: error.message || "Internal Server Error" }, { status: 500 });
+    console.error("Result API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

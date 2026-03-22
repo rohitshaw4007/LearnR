@@ -2,8 +2,8 @@
 import { useState, useEffect } from "react";
 import { 
   ArrowLeft, StopCircle, RefreshCcw, User, 
-  Clock, CheckCircle, Loader2, Search, Timer, 
-  TrendingUp
+  Clock, CheckCircle, XCircle, Loader2, Search, Timer, 
+  TrendingUp, FileText, X 
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
@@ -14,49 +14,34 @@ export default function LiveExamMonitor({ testId, onBack }) {
   const [endingExam, setEndingExam] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   
-  // New States for Timer
   const [timeLeft, setTimeLeft] = useState("");
   const [timeProgress, setTimeProgress] = useState(0);
   const [isTimeCritical, setIsTimeCritical] = useState(false);
 
-  // 1. DATA FETCHING 
+  // NEW: State for modal
+  const [viewPaperStudent, setViewPaperStudent] = useState(null);
+
   const fetchLiveData = async () => {
-    console.log(`\n🔄 [MONITOR] Fetching Latest Data for Test ID: ${testId} at ${new Date().toLocaleTimeString()}`);
-    
     try {
       const t = new Date().getTime();
 
-      // A. Fetch Test Details
-      const testRes = await fetch(`/api/admin/tests/${testId}?t=${t}`, { 
-          cache: 'no-store',
-          headers: { 'Pragma': 'no-cache' } 
-      });
-      
+      const testRes = await fetch(`/api/admin/tests/${testId}?t=${t}`, { cache: 'no-store' });
       if (!testRes.ok) throw new Error("Failed to fetch test details");
       const testData = await testRes.json();
-      
-      console.log("📄 [MONITOR] Test Details Received:", {
-          title: testData.title,
-          status: testData.status,
-          scheduledAt: testData.scheduledAt,
-          validityHours: testData.validityHours
-      });
       setTestDetails(testData);
 
-      // B. Fetch Analytics
-      const analyticsRes = await fetch(`/api/admin/tests/${testId}/analytics?t=${t}`, {
-          cache: 'no-store',
-          headers: { 'Pragma': 'no-cache' }
-      });
-
+      const analyticsRes = await fetch(`/api/admin/tests/${testId}/analytics?t=${t}`, { cache: 'no-store' });
       if (analyticsRes.ok) {
         const analyticsData = await analyticsRes.json();
         
+        // Ensure timeTaken and answers are captured
         const submissions = analyticsData.analytics?.studentsData?.filter(s => s.status === 'Present').map(s => ({
             studentName: s.name,
             email: s.email,
             submittedAt: s.submittedAt,
-            score: s.score
+            score: s.score,
+            timeTaken: s.timeTaken, // NEW
+            answers: s.answers      // NEW
         })) || [];
 
         setAnalytics({
@@ -65,42 +50,26 @@ export default function LiveExamMonitor({ testId, onBack }) {
             highestScore: analyticsData.analytics?.topStudents?.[0]?.score || 0,
             averageScore: 0 
         });
-
-      } else {
-        console.error("❌ [MONITOR] Analytics Fetch Failed:", analyticsRes.status);
       }
 
     } catch (error) {
-      console.error("🔥 [MONITOR] Error fetching live data:", error);
       toast.error("Connection Error: Failed to update live data");
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial Fetch & Auto-Refresh
   useEffect(() => {
     if (!testId) return;
-    
     fetchLiveData();
-    
-    const interval = setInterval(() => {
-        fetchLiveData();
-    }, 15000); 
-
-    return () => {
-        clearInterval(interval);
-    };
+    const interval = setInterval(() => fetchLiveData(), 15000); 
+    return () => clearInterval(interval);
   }, [testId]);
 
-  // 2. LIVE COUNTDOWN LOGIC (FIXED VALIDITY HOURS)
   useEffect(() => {
     if (!testDetails) return;
-
     const calculateTime = () => {
       const startTime = new Date(testDetails.scheduledAt).getTime();
-      
-      // 🔥 FIX: Removed 12 hours hardcoding, using DB validityHours
       const validHours = testDetails.validityHours || 24;
       const windowDurationMs = validHours * 60 * 60 * 1000; 
       
@@ -123,11 +92,8 @@ export default function LiveExamMonitor({ testId, onBack }) {
       const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((difference % (1000 * 60)) / 1000);
 
-      const formatted = `${hours > 0 ? hours + ':' : ''}${minutes < 10 ? '0' + minutes : minutes}:${seconds < 10 ? '0' + seconds : seconds}`;
-      setTimeLeft(formatted);
-
-      if (difference < 30 * 60 * 1000) setIsTimeCritical(true);
-      else setIsTimeCritical(false);
+      setTimeLeft(`${hours > 0 ? hours + ':' : ''}${minutes < 10 ? '0' + minutes : minutes}:${seconds < 10 ? '0' + seconds : seconds}`);
+      setIsTimeCritical(difference < 30 * 60 * 1000);
     };
 
     calculateTime();
@@ -135,31 +101,29 @@ export default function LiveExamMonitor({ testId, onBack }) {
     return () => clearInterval(timerInterval);
   }, [testDetails]);
 
-
-  // 3. END EXAM HANDLER
   const handleEndExam = async () => {
     if (!confirm("Are you sure you want to END this exam?")) return;
-    
     setEndingExam(true);
-    
     try {
       const res = await fetch(`/api/admin/tests/${testId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "completed" })
       });
-
       if (res.ok) {
         toast.success("Exam has been ended successfully!");
         onBack(); 
-      } else {
-        throw new Error("Failed to end exam");
       }
-    } catch (error) {
-      toast.error("Error ending exam");
-    } finally {
-      setEndingExam(false);
-    }
+    } catch (error) { toast.error("Error ending exam"); } 
+    finally { setEndingExam(false); }
+  };
+
+  // NEW: Formatter
+  const formatTime = (seconds) => {
+    if (!seconds) return "0m 0s";
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
   };
 
   const filteredStudents = analytics?.submissions?.filter(sub => 
@@ -176,7 +140,6 @@ export default function LiveExamMonitor({ testId, onBack }) {
     );
   }
 
-  // 🔥 FIX: Calculate Window End Time dynamically for Rendering
   const startTimeObj = testDetails ? new Date(testDetails.scheduledAt) : new Date();
   const validHoursRender = testDetails?.validityHours || 24;
   const windowEndTimeObj = new Date(startTimeObj.getTime() + (validHoursRender * 60 * 60 * 1000));
@@ -184,7 +147,7 @@ export default function LiveExamMonitor({ testId, onBack }) {
   return (
     <div className="animate-in fade-in slide-in-from-right duration-300 pb-20">
       
-      {/* --- TOP BAR --- */}
+      {/* TOP BAR */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 pb-6 border-b border-white/10">
         <div>
           <button onClick={onBack} className="mb-4 flex items-center text-gray-400 hover:text-white transition-colors text-sm font-medium">
@@ -203,8 +166,7 @@ export default function LiveExamMonitor({ testId, onBack }) {
                 <RefreshCcw size={20} />
             </button>
             <button 
-                onClick={handleEndExam} 
-                disabled={endingExam}
+                onClick={handleEndExam} disabled={endingExam}
                 className="flex-1 md:flex-none justify-center flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(220,38,38,0.4)]"
             >
                 {endingExam ? <Loader2 className="animate-spin" size={20}/> : <StopCircle size={20} />}
@@ -213,18 +175,12 @@ export default function LiveExamMonitor({ testId, onBack }) {
         </div>
       </div>
 
-      {/* --- MAIN DASHBOARD GRID --- */}
+      {/* STATS */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 mb-8">
-          
-          {/* 1. TIMER CARD */}
           <div className={`md:col-span-4 relative overflow-hidden rounded-2xl border ${isTimeCritical ? 'border-red-500/30 bg-red-500/5' : 'border-cyan-500/30 bg-cyan-500/5'} p-6 flex flex-col justify-center items-center text-center shadow-[0_0_30px_-10px_rgba(0,0,0,0.5)]`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gray-800">
-                  <div 
-                    className={`h-full transition-all duration-1000 ${isTimeCritical ? 'bg-red-500' : 'bg-cyan-500'}`} 
-                    style={{ width: `${timeProgress}%` }}
-                  ></div>
+                  <div className={`h-full transition-all duration-1000 ${isTimeCritical ? 'bg-red-500' : 'bg-cyan-500'}`} style={{ width: `${timeProgress}%` }}></div>
               </div>
-              
               <p className={`text-sm font-bold uppercase tracking-widest mb-2 ${isTimeCritical ? 'text-red-400' : 'text-cyan-400'}`}>Window Closing In</p>
               <div className="flex items-center gap-3">
                  <Timer size={32} className={isTimeCritical ? 'text-red-500 animate-pulse' : 'text-cyan-500'} />
@@ -235,12 +191,9 @@ export default function LiveExamMonitor({ testId, onBack }) {
               <p className="text-gray-500 text-xs mt-4">Ends at {windowEndTimeObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
           </div>
 
-          {/* 2. TIMING DETAILS */}
           <div className="md:col-span-4 bg-[#0a0a0a] border border-white/5 rounded-2xl p-6 flex flex-col justify-between">
               <div>
-                  <h3 className="text-gray-400 font-bold text-sm flex items-center gap-2 mb-4">
-                      <Clock size={16} className="text-yellow-500"/> Exam Schedule
-                  </h3>
+                  <h3 className="text-gray-400 font-bold text-sm flex items-center gap-2 mb-4"><Clock size={16} className="text-yellow-500"/> Exam Schedule</h3>
                   <div className="space-y-4">
                       <div className="flex justify-between items-center border-b border-white/5 pb-3">
                           <span className="text-gray-500 text-sm">Start Time</span>
@@ -258,11 +211,8 @@ export default function LiveExamMonitor({ testId, onBack }) {
               </div>
           </div>
 
-          {/* 3. LIVE STATS */}
           <div className="md:col-span-4 bg-[#0a0a0a] border border-white/5 rounded-2xl p-6">
-              <h3 className="text-gray-400 font-bold text-sm flex items-center gap-2 mb-6">
-                  <TrendingUp size={16} className="text-green-500"/> Live Stats
-              </h3>
+              <h3 className="text-gray-400 font-bold text-sm flex items-center gap-2 mb-6"><TrendingUp size={16} className="text-green-500"/> Live Stats</h3>
               <div className="grid grid-cols-2 gap-4">
                   <div className="bg-[#111] rounded-xl p-4 text-center border border-white/5">
                       <p className="text-2xl font-black text-white">{analytics?.submissions?.length || 0}</p>
@@ -272,30 +222,21 @@ export default function LiveExamMonitor({ testId, onBack }) {
                       <p className="text-2xl font-black text-green-400">{analytics?.highestScore || 0}</p>
                       <p className="text-[10px] text-gray-500 uppercase font-bold mt-1">Top Score</p>
                   </div>
-                  <div className="col-span-2 bg-[#111] rounded-xl p-4 flex justify-between items-center border border-white/5">
-                      <span className="text-gray-400 text-xs font-bold uppercase">Status</span>
-                      <span className="text-xl font-black text-green-400 animate-pulse">ACTIVE</span>
-                  </div>
               </div>
           </div>
       </div>
 
-      {/* --- STUDENT LIST --- */}
+      {/* STUDENT LIST */}
       <div className="bg-[#0a0a0a] border border-white/5 rounded-2xl overflow-hidden">
           <div className="p-6 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
               <div className="flex items-center gap-3">
                  <h3 className="text-xl font-bold text-white">Submitted Students</h3>
-                 <span className="px-2 py-0.5 rounded bg-gray-800 text-gray-400 text-xs font-bold border border-white/10">
-                    {analytics?.submissions?.length || 0}
-                 </span>
+                 <span className="px-2 py-0.5 rounded bg-gray-800 text-gray-400 text-xs font-bold border border-white/10">{analytics?.submissions?.length || 0}</span>
               </div>
               <div className="relative w-full md:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
                   <input 
-                    type="text" 
-                    placeholder="Search student..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    type="text" placeholder="Search student..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full bg-[#111] border border-white/10 rounded-lg py-2 pl-9 pr-4 text-sm text-white focus:border-cyan-500 outline-none"
                   />
               </div>
@@ -307,8 +248,9 @@ export default function LiveExamMonitor({ testId, onBack }) {
                       <tr className="bg-[#111] text-gray-400 text-xs uppercase tracking-wider">
                           <th className="p-4 font-medium">Student Name</th>
                           <th className="p-4 font-medium">Submitted At</th>
+                          <th className="p-4 font-medium">Time Taken</th>
                           <th className="p-4 font-medium">Score</th>
-                          <th className="p-4 font-medium">Result</th>
+                          <th className="p-4 font-medium text-center">Action</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -329,33 +271,99 @@ export default function LiveExamMonitor({ testId, onBack }) {
                                   <td className="p-4 text-gray-400 text-sm font-mono">
                                       {new Date(student.submittedAt).toLocaleTimeString()}
                                   </td>
+                                  {/* NEW COLUMN */}
+                                  <td className="p-4 text-gray-400 text-sm font-mono">
+                                      <div className="flex items-center gap-1"><Clock size={14}/> {formatTime(student.timeTaken)}</div>
+                                  </td>
                                   <td className="p-4">
                                       <div className="flex items-baseline gap-1">
                                          <span className="font-mono text-white font-bold text-lg">{student.score}</span> 
                                          <span className="text-gray-600 text-xs">/ {testDetails?.totalMarks}</span>
                                       </div>
                                   </td>
-                                  <td className="p-4">
-                                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-500/10 text-green-400 text-xs font-bold border border-green-500/20">
-                                          <CheckCircle size={12}/> Success
-                                      </span>
+                                  {/* NEW ACTION BUTTON */}
+                                  <td className="p-4 text-center">
+                                      <button onClick={() => setViewPaperStudent(student)} className="px-3 py-1.5 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500 hover:text-black rounded transition-colors text-xs font-bold inline-flex items-center gap-1 border border-yellow-500/20">
+                                          <FileText size={14}/> Paper
+                                      </button>
                                   </td>
                               </tr>
                           ))
                       ) : (
-                          <tr>
-                              <td colSpan="4" className="p-12 text-center">
-                                  <div className="flex flex-col items-center justify-center text-gray-500">
-                                      <User size={30} className="mb-2 opacity-50"/>
-                                      <p>No submissions received yet.</p>
-                                  </div>
-                              </td>
-                          </tr>
+                          <tr><td colSpan="5" className="p-12 text-center text-gray-500">No submissions yet.</td></tr>
                       )}
                   </tbody>
               </table>
           </div>
       </div>
+
+      {/* VIEW PAPER MODAL FOR LIVE EXAM */}
+      {viewPaperStudent && (
+          <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-sm flex justify-center p-4 overflow-y-auto animate-in fade-in">
+              <div className="bg-[#0a0a0a] border border-white/10 w-full max-w-4xl rounded-2xl my-auto flex flex-col max-h-[90vh] shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+                  <div className="p-5 md:p-6 border-b border-white/10 flex justify-between items-center bg-[#111] sticky top-0 z-10 rounded-t-2xl">
+                      <div>
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                             <FileText size={20} className="text-yellow-500"/> {viewPaperStudent.studentName}'s Answer Sheet
+                          </h2>
+                          <p className="text-gray-400 text-sm mt-1 flex items-center gap-3">
+                             <span>Score: <span className="text-yellow-500 font-bold">{viewPaperStudent.score} / {testDetails?.totalMarks}</span></span>
+                             <span className="flex items-center gap-1"><Clock size={14}/> {formatTime(viewPaperStudent.timeTaken)}</span>
+                          </p>
+                      </div>
+                      <button onClick={() => setViewPaperStudent(null)} className="p-2 bg-white/5 hover:bg-red-500 rounded-full text-gray-400 hover:text-white transition-colors"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="p-5 md:p-8 overflow-y-auto space-y-6 custom-scrollbar bg-[#050505]">
+                      {testDetails?.questions?.map((q, idx) => {
+                          const studentAns = viewPaperStudent.answers[idx];
+                          const isCorrect = studentAns === q.correctOption;
+                          const isSkipped = studentAns === null || studentAns === undefined || studentAns === -1;
+                          
+                          return (
+                              <div key={idx} className={`bg-[#0a0a0a] border rounded-2xl p-5 md:p-6 shadow-lg ${isCorrect ? 'border-green-500/30' : isSkipped ? 'border-gray-600/30' : 'border-red-500/30'}`}>
+                                  <div className="flex justify-between items-start gap-4 mb-4">
+                                      <h3 className="text-white font-bold leading-relaxed">
+                                         <span className="text-yellow-500 mr-2 font-black text-lg">Q{idx+1}.</span>{q.questionText}
+                                      </h3>
+                                      <span className={`px-2 py-1 rounded text-[10px] font-black tracking-widest border flex-shrink-0 ${isCorrect ? 'bg-green-500/10 text-green-500 border-green-500/20' : isSkipped ? 'bg-gray-800 text-gray-400 border-white/10' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
+                                          {isCorrect ? 'CORRECT' : isSkipped ? 'SKIPPED' : 'INCORRECT'}
+                                      </span>
+                                  </div>
+                                  
+                                  {q.imageUrl && (
+                                      <div className="mb-6 rounded-xl overflow-hidden border border-white/10 bg-black/40 p-2 inline-block">
+                                         {/* eslint-disable-next-line @next/next/no-img-element */}
+                                         <img src={q.imageUrl} alt="Graphic" className="max-w-full max-h-[200px] object-contain rounded-lg"/>
+                                      </div>
+                                  )}
+                                  
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {q.options.map((opt, oIdx) => {
+                                          const isThisCorrect = oIdx === q.correctOption;
+                                          const isThisSelected = oIdx === studentAns;
+                                          
+                                          let optStyle = "bg-[#111] border-white/5 text-gray-400";
+                                          if (isThisCorrect) optStyle = "bg-green-500/10 border-green-500/50 text-green-400 font-bold";
+                                          else if (isThisSelected && !isThisCorrect) optStyle = "bg-red-500/10 border-red-500/50 text-red-400 line-through opacity-70";
+
+                                          return (
+                                              <div key={oIdx} className={`p-3 md:p-4 rounded-xl border flex items-center gap-3 transition-colors ${optStyle}`}>
+                                                  <span className="font-mono text-xs opacity-50">[{String.fromCharCode(65+oIdx)}]</span>
+                                                  <span className="text-sm flex-1">{opt}</span>
+                                                  {isThisCorrect && <CheckCircle size={16} className="text-green-500 flex-shrink-0"/>}
+                                                  {isThisSelected && !isThisCorrect && <XCircle size={16} className="text-red-500 flex-shrink-0"/>}
+                                              </div>
+                                          )
+                                      })}
+                                  </div>
+                              </div>
+                          )
+                      })}
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 }

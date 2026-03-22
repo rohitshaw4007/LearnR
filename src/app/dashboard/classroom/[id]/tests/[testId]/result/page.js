@@ -1,12 +1,30 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Trophy, Search, Download, FileText, CheckCircle, XCircle, AlertCircle, Loader2, ArrowLeft, BarChart2, BookOpen, UserX } from "lucide-react";
+import { Trophy, Search, Download, FileText, CheckCircle, XCircle, AlertCircle, Loader2, ArrowLeft, BarChart2, BookOpen, User } from "lucide-react";
 import toast from "react-hot-toast";
 import StudentClassroomSidebar from "@/components/classroom/StudentClassroomSidebar";
 
+// --- 🛠️ FIX: PDF IMAGE HELPER ---
+const getBase64Image = (url) => {
+    return new Promise((resolve, reject) => {
+        const img = new window.Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg'));
+        };
+        img.onerror = reject;
+        img.src = url;
+    });
+};
+
 export default function ResultPage() {
-  const params = useParams(); // { id: courseId, testId: testId }
+  const params = useParams(); 
   const router = useRouter();
   
   const [resultData, setResultData] = useState(null);
@@ -16,7 +34,6 @@ export default function ResultPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [downloading, setDownloading] = useState(false);
 
-  // --- FETCH DATA ---
   useEffect(() => {
     const fetchAllData = async () => {
       if (!params.testId || !params.id) {
@@ -28,39 +45,28 @@ export default function ResultPage() {
       try {
         setLoading(true);
 
-        // 1. Fetch Result
-        const resultRes = await fetch(`/api/exam/${params.testId}/result`);
+        const resultRes = await fetch(`/api/exam/${params.testId}/result?t=${Date.now()}`);
         let resultJson;
-        try {
-            resultJson = await resultRes.json();
-        } catch (e) {
-            throw new Error(`Invalid Server Response (${resultRes.status})`);
-        }
+        try { resultJson = await resultRes.json(); } 
+        catch (e) { throw new Error(`Invalid Server Response`); }
 
-        if (!resultRes.ok) {
-            console.error("❌ Result API Failed:", resultJson);
-            throw new Error(resultJson.message || `Server Error: ${resultRes.status}`);
-        }
+        if (!resultRes.ok) throw new Error(resultJson.error || `Server Error`);
         
         if (resultJson.success) {
             setResultData(resultJson.data);
         } else {
-            throw new Error(resultJson.message || "Unknown API Error");
+            throw new Error(resultJson.error || "Unknown API Error");
         }
 
-        // 2. Fetch Leaderboard
         try {
-            const lbRes = await fetch(`/api/courses/${params.id}/tests/${params.testId}/leaderboard`);
+            const lbRes = await fetch(`/api/courses/${params.id}/tests/${params.testId}/leaderboard?t=${Date.now()}`);
             if(lbRes.ok) {
                 const lbJson = await lbRes.json();
                 if (lbJson.success) setLeaderboardData(lbJson.leaderboard);
             }
-        } catch (err) {
-            console.warn("Leaderboard failed to load:", err);
-        }
+        } catch (err) { console.warn("Leaderboard failed to load"); }
 
       } catch (error) {
-        console.error("🔥 Critical Error:", error.message);
         setErrorMsg(error.message);
         toast.error(error.message);
       } finally {
@@ -71,7 +77,7 @@ export default function ResultPage() {
     fetchAllData();
   }, [params.id, params.testId]);
 
-  // --- PDF GENERATION ---
+  // --- PDF GENERATION WITH IMAGES ---
   const generatePDF = async (mode) => {
     if (!resultData?.questions) return toast.error("Data not available");
     setDownloading(true);
@@ -85,8 +91,20 @@ export default function ResultPage() {
         });
     }
 
+    // Pre-fetch images to base64 to avoid PDF blank image issue
+    const loadingToast = toast.loading("Processing Images & Compiling PDF...");
+    const questionsWithImages = await Promise.all(resultData.questions.map(async (q) => {
+        let b64Img = null;
+        if (q.imageUrl) {
+            try { b64Img = await getBase64Image(q.imageUrl); } 
+            catch(e) { console.error("Img error"); }
+        }
+        return { ...q, b64Img };
+    }));
+
     const isReport = mode === 'report';
     const element = document.createElement('div');
+    
     element.innerHTML = `
       <div style="font-family: Arial, sans-serif; color: #000; padding: 20px; font-size: 10px; line-height: 1.4;">
         
@@ -98,17 +116,12 @@ export default function ResultPage() {
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 15px;">
-            ${resultData.questions.map((q, idx) => {
+            ${questionsWithImages.map((q, idx) => {
                 const isCorrect = q.selectedOption === q.correctOption;
-                const isSkipped = q.selectedOption === null || q.selectedOption === -1;
+                const isSkipped = q.selectedOption === null || q.selectedOption === -1 || q.selectedOption === undefined;
                 
-                const statusColor = isReport 
-                    ? (isCorrect ? '#006400' : isSkipped ? '#666' : '#8B0000') 
-                    : '#000';
-                
-                const statusText = isReport
-                    ? (isCorrect ? 'CORRECT' : isSkipped ? 'SKIPPED' : 'INCORRECT')
-                    : `Q${idx + 1}`;
+                const statusColor = isReport ? (isCorrect ? '#006400' : isSkipped ? '#666' : '#8B0000') : '#000';
+                const statusText = isReport ? (isCorrect ? 'CORRECT' : isSkipped ? 'SKIPPED' : 'INCORRECT') : `Q${idx + 1}`;
 
                 return `
                 <div style="border-bottom: 1px dashed #ccc; padding-bottom: 10px; page-break-inside: avoid;">
@@ -120,9 +133,9 @@ export default function ResultPage() {
                         <span style="vertical-align: middle;">${q.questionText}</span>
                     </div>
 
-                    ${q.imageUrl ? `
+                    ${q.b64Img ? `
                     <div style="margin-top: 8px; margin-bottom: 8px;">
-                        <img src="${q.imageUrl}" style="max-height: 150px; max-width: 100%; border: 1px solid #ccc; border-radius: 4px;" />
+                        <img src="${q.b64Img}" style="max-height: 150px; max-width: 100%; border: 1px solid #ccc; border-radius: 4px;" />
                     </div>
                     ` : ''}
 
@@ -170,21 +183,22 @@ export default function ResultPage() {
       margin:       0.3,
       filename:     `${resultData.testTitle}_${isReport ? 'Report' : 'Paper'}.pdf`,
       image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true }, // Added useCORS: true for images
+      html2canvas:  { scale: 2, useCORS: true }, 
       jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
     };
 
     try {
         await window.html2pdf().set(opt).from(element).save();
-        toast.success("PDF Downloaded!");
+        toast.dismiss(loadingToast);
+        toast.success("PDF Downloaded Successfully!");
     } catch (e) {
+        toast.dismiss(loadingToast);
         toast.error("Download failed");
     } finally {
         setDownloading(false);
     }
   };
 
-  // --- RENDERING ---
   if (loading) return <div className="fixed inset-0 bg-black z-[200] flex items-center justify-center"><Loader2 className="animate-spin text-yellow-500" size={40}/></div>;
   
   if (errorMsg || !resultData) return (
@@ -206,10 +220,8 @@ export default function ResultPage() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex">
-      {/* Sidebar */}
       <StudentClassroomSidebar courseId={params.id} />
       
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 md:ml-64 animate-in fade-in duration-300 pb-20">
           
           {/* HEADER */}
@@ -237,7 +249,6 @@ export default function ResultPage() {
               {/* LEFT COLUMN: QUESTIONS */}
               <div className="xl:col-span-2 space-y-6">
                   
-                  {/* Search Bar */}
                   <div className="relative">
                       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18}/>
                       <input 
@@ -249,16 +260,14 @@ export default function ResultPage() {
                       />
                   </div>
 
-                  {/* Questions List */}
                   <div className="space-y-6">
                       {filteredQuestions.map((q, index) => {
                           const isCorrect = q.selectedOption === q.correctOption;
-                          const isSkipped = q.selectedOption === null || q.selectedOption === -1;
+                          const isSkipped = q.selectedOption === null || q.selectedOption === -1 || q.selectedOption === undefined;
                           
                           return (
                               <div key={index} className={`bg-[#0a0a0a] border rounded-2xl p-5 md:p-8 transition-colors ${isCorrect ? 'border-green-500/30' : isSkipped ? 'border-gray-600/30' : 'border-red-500/30'}`}>
                                   
-                                  {/* Q Header */}
                                   <div className="flex justify-between items-start gap-4 mb-4 md:mb-6">
                                       <h3 className="text-base md:text-xl font-bold text-white leading-relaxed">
                                           <span className="text-yellow-500 mr-2 font-black">Q{index + 1}.</span>
@@ -269,7 +278,6 @@ export default function ResultPage() {
                                       </span>
                                   </div>
 
-                                  {/* NEW: RESULT PAGE IMAGE DISPLAY */}
                                   {q.imageUrl && (
                                       <div className="mb-6 rounded-xl overflow-hidden border border-white/10 bg-black/40 p-2 inline-block">
                                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -277,13 +285,12 @@ export default function ResultPage() {
                                       </div>
                                   )}
 
-                                  {/* Options */}
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-6">
                                       {q.options.map((opt, optIdx) => {
                                           const isThisCorrect = optIdx === q.correctOption;
                                           const isThisSelected = optIdx === q.selectedOption;
                                           
-                                          let optStyle = "bg-[#111] border-white/5 text-gray-400"; // Default
+                                          let optStyle = "bg-[#111] border-white/5 text-gray-400"; 
                                           if (isThisCorrect) optStyle = "bg-green-500/10 border-green-500/50 text-green-400 font-bold shadow-[0_0_15px_rgba(34,197,94,0.1)]";
                                           else if (isThisSelected && !isThisCorrect) optStyle = "bg-red-500/10 border-red-500/50 text-red-400 line-through opacity-80";
 
@@ -299,7 +306,6 @@ export default function ResultPage() {
                                       })}
                                   </div>
 
-                                  {/* Explanation */}
                                   {q.description && (
                                       <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mt-2 relative overflow-hidden">
                                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500"></div>
@@ -307,7 +313,6 @@ export default function ResultPage() {
                                           <p className="text-gray-300 text-xs md:text-sm leading-relaxed">{q.description}</p>
                                       </div>
                                   )}
-
                               </div>
                           )
                       })}
@@ -317,7 +322,6 @@ export default function ResultPage() {
               {/* RIGHT COLUMN: STATS & LEADERBOARD */}
               <div className="space-y-6">
                   
-                  {/* Score Card */}
                   <div className="bg-gradient-to-br from-yellow-600/20 to-[#111] border border-yellow-500/30 rounded-3xl p-6 md:p-8 text-center relative overflow-hidden shadow-[0_0_40px_-10px_rgba(234,179,8,0.2)]">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none"></div>
                       
@@ -341,11 +345,10 @@ export default function ResultPage() {
                       </div>
                   </div>
 
-                  {/* Leaderboard Card */}
                   <div className="bg-[#0a0a0a] border border-white/5 rounded-2xl overflow-hidden sticky top-[100px]">
                       <div className="p-5 border-b border-white/5 flex items-center justify-between bg-[#111]">
                           <h3 className="font-bold text-white flex items-center gap-2"><BarChart2 size={18} className="text-yellow-500"/> Leaderboard</h3>
-                          <span className="text-xs text-gray-500 font-mono">Top Rankers</span>
+                          <span className="text-xs text-gray-500 font-mono">Top 10 Rankers</span>
                       </div>
                       
                       <div className="p-2 space-y-1 max-h-[400px] overflow-y-auto custom-scrollbar">
@@ -359,7 +362,7 @@ export default function ResultPage() {
                                               </span>
                                               <div className="flex flex-col">
                                                   <span className={`text-sm font-bold truncate max-w-[120px] ${student.studentId === resultData.studentId ? 'text-yellow-400' : 'text-gray-200'}`}>
-                                                      {student.studentId === resultData.studentId ? "You (You)" : student.studentName}
+                                                      {student.studentId === resultData.studentId ? "You" : student.studentName}
                                                   </span>
                                                   <span className="text-[9px] text-gray-500 uppercase tracking-widest">{student.timeTaken}s</span>
                                               </div>
@@ -379,7 +382,6 @@ export default function ResultPage() {
                   </div>
 
               </div>
-
           </div>
       </div>
     </div>
