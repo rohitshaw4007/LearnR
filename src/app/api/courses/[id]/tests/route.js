@@ -4,7 +4,10 @@ import Test from "@/models/Test";
 import Result from "@/models/Result";
 import { getDataFromToken } from "@/lib/getDataFromToken";
 
+// 🚨 STRICT NO-CACHE TO FIX UPCOMING TESTS BUG
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 export async function GET(req, { params }) {
   try {
@@ -14,6 +17,7 @@ export async function GET(req, { params }) {
     let userId = null;
     try { userId = await getDataFromToken(req); } catch (e) {}
 
+    // Fetch tests avoiding draft
     const tests = await Test.find({ 
       courseId: id, 
       status: { $ne: 'draft' } 
@@ -38,18 +42,7 @@ export async function GET(req, { params }) {
         };
     });
 
-    // FIX: Added Strict Cache-Control
-    return NextResponse.json(
-      { success: true, tests: processedTests },
-      {
-        status: 200,
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-        }
-      }
-    );
+    return NextResponse.json({ success: true, tests: processedTests });
 
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

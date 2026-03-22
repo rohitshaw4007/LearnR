@@ -12,13 +12,10 @@ export async function GET(req, { params }) {
     await connectDB();
     const { id } = await params;
 
-    // 🛠️ FIX: Added 'courseId' here. Iske bina enrollments fetch nahi ho rahe the!
     const test = await Test.findById(id).select('title totalMarks duration validityHours questions courseId');
     if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
     const results = await Result.find({ testId: id }).populate('studentId', 'name email');
-    
-    // Ab test.courseId proper value dega, aur enrolled students fetch ho jayenge
     const enrollments = await Enrollment.find({ course: test.courseId, status: "approved" }).populate('user', 'name email');
 
     let studentsData = [];
@@ -48,10 +45,14 @@ export async function GET(req, { params }) {
         });
     });
 
-    // Score ke hisaab se sort karenge taaki toppers upar aayein
-    studentsData.sort((a, b) => b.score - a.score);
+    // 🛠️ TIE-BREAKER LOGIC: Rank by Score (High to Low), If tie then Rank by Time (Low to High)
+    studentsData.sort((a, b) => {
+        if (b.score !== a.score) {
+            return b.score - a.score; 
+        }
+        return (a.timeTaken || 0) - (b.timeTaken || 0); 
+    });
 
-    // Top students me sirf unko lenge jo Present hain
     const topStudents = studentsData.filter(s => s.status === 'Present').slice(0, 5);
     const averageScore = presentCount > 0 ? (totalScore / presentCount).toFixed(2) : 0;
 
