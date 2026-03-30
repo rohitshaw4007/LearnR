@@ -64,11 +64,30 @@ export default function ExamPortalPage() {
         }
     };
 
+    // --- ANTI-CHEAT KEYBOARD LISTENER ---
+    const handleKeyDown = (e) => {
+        if (e.key === 'PrintScreen') {
+            try { navigator.clipboard.writeText(''); } catch(err) {}
+            toast.error("Screenshots are strictly prohibited!");
+            e.preventDefault();
+        }
+        if ((e.ctrlKey || e.metaKey) && ['p', 's', 'c'].includes(e.key.toLowerCase())) {
+            toast.error("This action is not allowed during the exam!");
+            e.preventDefault();
+        }
+        if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
+            try { navigator.clipboard.writeText(''); } catch(err) {}
+            toast.error("Screenshots are strictly prohibited!");
+            e.preventDefault();
+        }
+    };
+
     const enterFullScreen = async () => {
         try { await document.documentElement.requestFullscreen(); } catch (e) {}
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("keydown", handleKeyDown); 
     const handleContextMenu = (e) => e.preventDefault();
     document.addEventListener('contextmenu', handleContextMenu);
     
@@ -76,6 +95,7 @@ export default function ExamPortalPage() {
 
     return () => {
         document.removeEventListener("visibilitychange", handleVisibilityChange);
+        document.removeEventListener("keydown", handleKeyDown);
         document.removeEventListener('contextmenu', handleContextMenu);
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
@@ -101,7 +121,9 @@ export default function ExamPortalPage() {
         }
 
         if (!res.ok) throw new Error(data.error || `Server Error: ${res.statusText}`);
-        if (!data.test || !data.test.questions) throw new Error("Exam data is empty or invalid.");
+        if (!data.test || !data.test.questions || data.test.questions.length === 0) {
+            throw new Error("This exam does not contain any questions yet. Please contact the instructor.");
+        }
 
         setTest(data.test);
         setQuestions(data.test.questions);
@@ -201,6 +223,20 @@ export default function ExamPortalPage() {
 
   const currentQ = questions[currentQIndex];
 
+  // --- 🛠️ FIX: SAFETY CHECK ADDED HERE ---
+  if (!currentQ) {
+      return (
+          <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 text-center">
+              <AlertTriangle size={64} className="text-yellow-500 mb-6" />
+              <h2 className="text-xl md:text-2xl font-bold text-white mb-2">No Questions Found</h2>
+              <div className="bg-yellow-900/20 border border-yellow-500/50 p-4 rounded-lg mb-8 max-w-lg">
+                  <p className="text-yellow-200 text-sm">This exam does not currently have any valid questions loaded.</p>
+              </div>
+              <button onClick={() => router.push("/dashboard")} className="px-6 py-2 bg-gray-800 text-white rounded-lg font-bold hover:bg-gray-700 text-sm">Return to Dashboard</button>
+          </div>
+      );
+  }
+
   return (
     <div className="fixed inset-0 bg-[#030303] text-white flex flex-col overflow-hidden font-sans select-none">
         
@@ -267,7 +303,7 @@ export default function ExamPortalPage() {
                                     </span>
                                 </div>
 
-                                {/* --- NEW: IMAGE VIEWER IN EXAM --- */}
+                                {/* --- IMAGE VIEWER IN EXAM --- */}
                                 {currentQ.imageUrl && (
                                     <div className="mb-8 relative z-10 flex justify-center">
                                         <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/50 p-2 max-w-full inline-block shadow-[0_0_20px_rgba(6,182,212,0.1)]">

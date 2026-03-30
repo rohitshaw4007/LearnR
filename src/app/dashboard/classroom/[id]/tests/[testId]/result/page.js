@@ -1,11 +1,10 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Trophy, Search, Download, FileText, CheckCircle, XCircle, AlertCircle, Loader2, ArrowLeft, BarChart2, BookOpen, User } from "lucide-react";
+import { Trophy, Search, Download, FileText, CheckCircle, XCircle, AlertCircle, Loader2, ArrowLeft, BarChart2, BookOpen, Clock } from "lucide-react";
 import toast from "react-hot-toast";
 import StudentClassroomSidebar from "@/components/classroom/StudentClassroomSidebar";
 
-// --- 🛠️ FIX: PDF IMAGE HELPER ---
 const getBase64Image = (url) => {
     return new Promise((resolve, reject) => {
         const img = new window.Image();
@@ -54,17 +53,19 @@ export default function ResultPage() {
         
         if (resultJson.success) {
             setResultData(resultJson.data);
+            
+            if(!resultJson.data.isExamActive) {
+                try {
+                    const lbRes = await fetch(`/api/courses/${params.id}/tests/${params.testId}/leaderboard?t=${Date.now()}`);
+                    if(lbRes.ok) {
+                        const lbJson = await lbRes.json();
+                        if (lbJson.success) setLeaderboardData(lbJson.leaderboard);
+                    }
+                } catch (err) { console.warn("Leaderboard failed to load"); }
+            }
         } else {
             throw new Error(resultJson.error || "Unknown API Error");
         }
-
-        try {
-            const lbRes = await fetch(`/api/courses/${params.id}/tests/${params.testId}/leaderboard?t=${Date.now()}`);
-            if(lbRes.ok) {
-                const lbJson = await lbRes.json();
-                if (lbJson.success) setLeaderboardData(lbJson.leaderboard);
-            }
-        } catch (err) { console.warn("Leaderboard failed to load"); }
 
       } catch (error) {
         setErrorMsg(error.message);
@@ -77,7 +78,6 @@ export default function ResultPage() {
     fetchAllData();
   }, [params.id, params.testId]);
 
-  // --- PDF GENERATION WITH IMAGES ---
   const generatePDF = async (mode) => {
     if (!resultData?.questions) return toast.error("Data not available");
     setDownloading(true);
@@ -91,7 +91,6 @@ export default function ResultPage() {
         });
     }
 
-    // Pre-fetch images to base64 to avoid PDF blank image issue
     const loadingToast = toast.loading("Processing Images & Compiling PDF...");
     const questionsWithImages = await Promise.all(resultData.questions.map(async (q) => {
         let b64Img = null;
@@ -117,8 +116,8 @@ export default function ResultPage() {
 
         <div style="display: flex; flex-direction: column; gap: 15px;">
             ${questionsWithImages.map((q, idx) => {
-                const isCorrect = q.selectedOption === q.correctOption;
                 const isSkipped = q.selectedOption === null || q.selectedOption === -1 || q.selectedOption === undefined;
+                const isCorrect = !isSkipped && q.selectedOption === q.correctOption; 
                 
                 const statusColor = isReport ? (isCorrect ? '#006400' : isSkipped ? '#666' : '#8B0000') : '#000';
                 const statusText = isReport ? (isCorrect ? 'CORRECT' : isSkipped ? 'SKIPPED' : 'INCORRECT') : `Q${idx + 1}`;
@@ -199,6 +198,12 @@ export default function ResultPage() {
     }
   };
 
+  // --- TAB REDIRECT FIX ---
+  const handleSidebarTabChange = (tabId) => {
+      // Jab koi result page se sidebar ke kisi tab par click karega, toh ye usko wapas main classroom me bhej dega
+      router.push(`/dashboard/classroom/${params.id}`);
+  };
+
   if (loading) return <div className="fixed inset-0 bg-black z-[200] flex items-center justify-center"><Loader2 className="animate-spin text-yellow-500" size={40}/></div>;
   
   if (errorMsg || !resultData) return (
@@ -210,6 +215,33 @@ export default function ResultPage() {
       </div>
   );
 
+  if (resultData.isExamActive) {
+      return (
+          <div className="min-h-screen bg-[#050505] text-white flex">
+              {/* 🛠️ FIX APPLIED HERE */}
+              <StudentClassroomSidebar 
+                  courseId={params.id} 
+                  activeTab="tests" 
+                  setActiveTab={handleSidebarTabChange} 
+              />
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300 md:ml-64">
+                  <Clock size={72} className="text-yellow-500 mb-6 animate-pulse" />
+                  <h2 className="text-2xl md:text-4xl font-black mb-4">Exam is still active!</h2>
+                  <p className="text-gray-400 mb-6 max-w-lg leading-relaxed">
+                      To ensure fair play and prevent paper leakage, the detailed results, marks, and question paper downloads are disabled until the exam window closes for everyone.
+                  </p>
+                  <div className="bg-yellow-500/10 border border-yellow-500/30 px-6 py-4 rounded-xl mb-8">
+                      <p className="text-yellow-500 font-mono text-sm uppercase tracking-widest">Results will be available after:</p>
+                      <p className="text-xl font-bold text-white mt-1">{new Date(resultData.availableAt).toLocaleString()}</p>
+                  </div>
+                  <button onClick={() => router.push(`/dashboard/classroom/${params.id}`)} className="px-8 py-3 bg-[#111] hover:bg-white/5 border border-white/10 rounded-xl font-bold transition flex items-center gap-2">
+                      <ArrowLeft size={18}/> Return to Classroom
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
   const filteredQuestions = resultData.questions?.filter(q => 
     q.questionText.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
@@ -220,11 +252,15 @@ export default function ResultPage() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex">
-      <StudentClassroomSidebar courseId={params.id} />
+      {/* 🛠️ FIX APPLIED HERE */}
+      <StudentClassroomSidebar 
+          courseId={params.id} 
+          activeTab="tests" 
+          setActiveTab={handleSidebarTabChange} 
+      />
       
       <div className="flex-1 flex flex-col min-w-0 md:ml-64 animate-in fade-in duration-300 pb-20">
           
-          {/* HEADER */}
           <div className="sticky top-0 z-40 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-white/5 p-4 md:p-6 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
              <div>
                 <button onClick={() => router.push(`/dashboard/classroom/${params.id}`)} className="flex items-center text-gray-500 hover:text-yellow-500 transition-colors text-xs font-bold mb-2 uppercase tracking-widest">
@@ -246,7 +282,6 @@ export default function ResultPage() {
 
           <div className="p-4 md:p-6 max-w-7xl mx-auto w-full grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
               
-              {/* LEFT COLUMN: QUESTIONS */}
               <div className="xl:col-span-2 space-y-6">
                   
                   <div className="relative">
@@ -262,8 +297,8 @@ export default function ResultPage() {
 
                   <div className="space-y-6">
                       {filteredQuestions.map((q, index) => {
-                          const isCorrect = q.selectedOption === q.correctOption;
                           const isSkipped = q.selectedOption === null || q.selectedOption === -1 || q.selectedOption === undefined;
+                          const isCorrect = !isSkipped && q.selectedOption === q.correctOption; 
                           
                           return (
                               <div key={index} className={`bg-[#0a0a0a] border rounded-2xl p-5 md:p-8 transition-colors ${isCorrect ? 'border-green-500/30' : isSkipped ? 'border-gray-600/30' : 'border-red-500/30'}`}>
@@ -319,7 +354,6 @@ export default function ResultPage() {
                   </div>
               </div>
 
-              {/* RIGHT COLUMN: STATS & LEADERBOARD */}
               <div className="space-y-6">
                   
                   <div className="bg-gradient-to-br from-yellow-600/20 to-[#111] border border-yellow-500/30 rounded-3xl p-6 md:p-8 text-center relative overflow-hidden shadow-[0_0_40px_-10px_rgba(234,179,8,0.2)]">

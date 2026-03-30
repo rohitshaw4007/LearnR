@@ -21,14 +21,37 @@ export async function GET(req, { params }) {
     const test = await Test.findById(id);
     if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
-    // 🛠️ FIX: Ab har question ke sath image aur student ka answer (selectedOption) jayega
+    // --- LEAKAGE PROTECTION LOGIC (BUG FIXED) ---
+    // Check if exam is still active based on Time AND Status
+    const startTime = new Date(test.scheduledAt).getTime();
+    const validityHours = Number(test.validityHours) || 24; // Added Number() for safety
+    const endTime = startTime + (validityHours * 60 * 60 * 1000);
+    const currentTime = Date.now();
+
+    // Exam active tabhi manenge jab time bacha ho AUR test ka status 'completed' na ho
+    const isExamActive = (currentTime < endTime) && (test.status !== 'completed');
+
+    // Agar exam abhi bhi chal raha hai, toh sirf status bhejo, answers nahi
+    if (isExamActive) {
+        return NextResponse.json({
+            success: true,
+            data: {
+                testTitle: test.title,
+                studentId: userId,
+                isExamActive: true,
+                availableAt: new Date(endTime).toISOString(), // Time when result will be visible
+            }
+        });
+    }
+
+    // --- FULL RESULT GENERATION (Exam Ended) ---
     const mappedQuestions = test.questions.map((q, index) => {
       return {
         questionText: q.questionText,
-        imageUrl: q.imageUrl || null, // Image Fix
+        imageUrl: q.imageUrl || null, 
         options: q.options,
         correctOption: q.correctOption,
-        selectedOption: result.answers[index] !== undefined ? result.answers[index] : -1, // Skipped Fix
+        selectedOption: result.answers[index] !== undefined ? result.answers[index] : -1, 
         description: q.description || null,
         marks: q.marks || 1
       };
@@ -39,10 +62,11 @@ export async function GET(req, { params }) {
       data: {
         testTitle: test.title,
         studentId: userId,
+        isExamActive: false, // Ab false jayega aur paper dikhega
         totalMarks: test.totalMarks,
         obtainedMarks: result.score,
-        correctCount: result.correctCount, // Fix for 0 correct
-        wrongCount: result.wrongCount,     // Fix for 0 wrong
+        correctCount: result.correctCount, 
+        wrongCount: result.wrongCount,     
         submittedAt: result.createdAt,
         questions: mappedQuestions
       }
