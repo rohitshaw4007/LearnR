@@ -9,10 +9,12 @@ import {
 import { toast } from "react-hot-toast";
 import jsPDF from "jspdf"; 
 
+// IMPORT THE COMPONENTS
 import MCQEditor from "./MCQEditor";
 import TestAnalyticsDashboard from "./TestAnalyticsDashboard"; 
 import LiveExamMonitor from "./LiveExamMonitor";
 
+// --- PDF HELPER FOR IMAGES ---
 const getBase64Image = (url) => {
     return new Promise((resolve, reject) => {
         const img = new window.Image();
@@ -74,17 +76,22 @@ export default function MCQManager({ courseId, onBack }) {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      // 🛠️ TIMEZONE BUG FIX: Phone ke local time ko ISO format me badalna
-      const localDateTimeString = `${formData.scheduledDate}T${formData.scheduledTime}`;
-      const localDateObject = new Date(localDateTimeString);
-      const isoScheduledAt = localDateObject.toISOString(); // Ye pure UTC form dega
+      // 🛠️ BUG FIX: Handle empty date/time for Manual Start
+      let isoScheduledAt;
+      if (formData.scheduledDate && formData.scheduledTime) {
+          const localDateTimeString = `${formData.scheduledDate}T${formData.scheduledTime}`;
+          isoScheduledAt = new Date(localDateTimeString).toISOString();
+      } else {
+          // Default to now if manual start and no date provided
+          isoScheduledAt = new Date().toISOString();
+      }
 
       const res = await fetch(`/api/admin/courses/${courseId}/tests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
             ...formData, 
-            scheduledAt: isoScheduledAt, // Corrected Time
+            scheduledAt: isoScheduledAt,
             type: "mcq", 
             status: "draft" 
         }),
@@ -114,9 +121,8 @@ export default function MCQManager({ courseId, onBack }) {
         if(res.ok) {
             toast.success(newStatus === 'live' ? "Exam Started Successfully!" : "Exam Ended!");
             fetchTests();
-            if(selectedTestForPreview && selectedTestForPreview._id === testId) {
-                setSelectedTestForPreview(prev => ({...prev, status: newStatus}));
-            }
+            // Close preview if it was open
+            if (previewModalOpen) setPreviewModalOpen(false);
         } else {
             toast.error("Failed to update status");
         }
@@ -144,15 +150,23 @@ export default function MCQManager({ courseId, onBack }) {
 
     try {
         let testData = selectedTestForDownload;
-        if(!testData.questions || testData.questions.length === 0) {
-             const res = await fetch(`/api/admin/tests/${testData._id}`);
-             if(res.ok) testData = await res.json();
+        // Always fetch full test to ensure we have all questions
+        const res = await fetch(`/api/admin/tests/${testData._id}`);
+        if(res.ok) {
+            testData = await res.json();
+        } else {
+            throw new Error("Failed to fetch full test data");
+        }
+
+        if (!testData.questions || testData.questions.length === 0) {
+            throw new Error("No questions found in this test");
         }
 
         const doc = new jsPDF();
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
         
+        // Header
         doc.setFillColor(255, 204, 0); 
         doc.rect(0, 0, pageWidth, 20, 'F');
         doc.setTextColor(0, 0, 0); 
@@ -163,6 +177,7 @@ export default function MCQManager({ courseId, onBack }) {
         doc.setFont("helvetica", "normal");
         doc.text("Exam Paper", pageWidth - 30, 13);
 
+        // Details
         doc.setTextColor(0, 0, 0);
         doc.setFont("times", "bold");
         doc.setFontSize(16); 
@@ -176,9 +191,10 @@ export default function MCQManager({ courseId, onBack }) {
         doc.setLineWidth(0.5);
         doc.line(12, 42, pageWidth - 12, 42);
 
+        // Questions Loop
         let yPos = 50;
         
-        for (let index = 0; index < testData.questions?.length; index++) {
+        for (let index = 0; index < testData.questions.length; index++) {
             const q = testData.questions[index];
             
             if (yPos > pageHeight - 30) {
@@ -188,6 +204,7 @@ export default function MCQManager({ courseId, onBack }) {
                 doc.rect(0, 0, pageWidth, 3, 'F');
             }
             
+            // Question Text
             doc.setFont("times", "bold");
             doc.setFontSize(10); 
             doc.setTextColor(0, 0, 0);
@@ -196,6 +213,7 @@ export default function MCQManager({ courseId, onBack }) {
             doc.text(splitTitle, 12, yPos);
             yPos += (splitTitle.length * 4.5) + 2; 
 
+            // IMAGE LOGIC
             if (q.imageUrl) {
                 try {
                     const imgObj = await getBase64Image(q.imageUrl);
@@ -212,11 +230,10 @@ export default function MCQManager({ courseId, onBack }) {
                     
                     doc.addImage(imgObj.dataURL, 'JPEG', 16, yPos, w, h);
                     yPos += h + 4; 
-                } catch (err) {
-                    console.error("Failed to load PDF image", err);
-                }
+                } catch (err) { console.error("PDF image failed", err); }
             }
 
+            // Options
             doc.setFont("helvetica", "normal");
             doc.setFontSize(9); 
             doc.setTextColor(20, 20, 20);
@@ -237,6 +254,7 @@ export default function MCQManager({ courseId, onBack }) {
                 });
             }
 
+            // Solutions
             if (type === 'solution') {
                 yPos += 1;
                 doc.setFillColor(255, 250, 225); 
@@ -261,22 +279,14 @@ export default function MCQManager({ courseId, onBack }) {
             }
         }
 
-        const pageCount = doc.internal.getNumberOfPages();
-        for(let i = 1; i <= pageCount; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`${i}/${pageCount}`, pageWidth - 15, pageHeight - 10);
-            doc.text("LearnR Academy", pageWidth / 2, pageHeight - 10, { align: 'center' });
-        }
-        
         doc.save(`${testData.title.replace(/\s+/g, '_')}_${type}.pdf`);
         toast.dismiss(loadingToast);
-        toast.success("PDF Downloaded with Images!");
+        toast.success("PDF Downloaded Successfully!");
         setDownloadModalOpen(false);
     } catch (error) {
+        console.error(error);
         toast.dismiss(loadingToast);
-        toast.error("Failed to generate PDF");
+        toast.error(error.message || "Failed to generate PDF");
     } finally {
         setIsDownloading(false);
     }
@@ -288,12 +298,13 @@ export default function MCQManager({ courseId, onBack }) {
         try {
             const res = await fetch(`/api/admin/tests/${test._id}`);
             if(res.ok) testData = await res.json();
-        } catch(e) { }
+        } catch(e) { console.error(e); }
       }
       setSelectedTestForPreview(testData);
       setPreviewModalOpen(true);
   };
 
+  // --- RENDER CONDITION ---
   if (selectedTestId) {
     return <MCQEditor testId={selectedTestId} onBack={() => setSelectedTestId(null)} />;
   }
@@ -377,19 +388,27 @@ export default function MCQManager({ courseId, onBack }) {
                       <div className="text-xs font-mono text-gray-500">{test.questions?.length || 0} Qs • {test.totalMarks} Marks</div>
                       
                       <div className="flex items-center gap-2">
-                         <button onClick={(e) => { e.stopPropagation(); setSelectedTestForDownload(test); setDownloadModalOpen(true); }} className="p-2 hover:bg-yellow-500 hover:text-black text-yellow-500 rounded-lg transition-all">
+                         <button onClick={(e) => { e.stopPropagation(); setSelectedTestForDownload(test); setDownloadModalOpen(true); }} className="p-2 bg-yellow-500/5 hover:bg-yellow-500 text-yellow-500 hover:text-black rounded-lg transition-all" title="Download PDF">
                             <Download size={18}/>
                          </button>
+
                          {test.status === 'completed' && (
-                             <button onClick={(e) => { e.stopPropagation(); setSelectedAnalyticsTestId(test._id); }} className="p-2 hover:bg-blue-500 text-blue-500 hover:text-white rounded-lg transition-all"><BarChart2 size={18} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); setSelectedAnalyticsTestId(test._id); }} className="p-2 hover:bg-blue-500 text-blue-500 hover:text-white rounded-lg transition-all" title="View Result">
+                                <BarChart2 size={18} />
+                             </button>
                          )}
+
                          {(test.status === 'scheduled' || test.status === 'draft') && (
-                             <button onClick={(e) => { e.stopPropagation(); handleOpenPreview(test); }} className="p-2 hover:bg-green-500 text-gray-400 hover:text-black rounded-lg transition-all"><PlayCircle size={18} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); handleOpenPreview(test); }} className="p-2 hover:bg-green-500 text-gray-400 hover:text-black rounded-lg transition-all" title="Live Preview">
+                                <PlayCircle size={18} />
+                             </button>
                          )}
+                         
                          {test.status === 'live' && (
-                             <button onClick={(e) => { e.stopPropagation(); toggleStatus(test._id, 'completed'); }} className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors"><StopCircle size={18} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); toggleStatus(test._id, 'completed'); }} className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors" title="End Exam"><StopCircle size={18} /></button>
                          )}
-                         <button onClick={(e) => { e.stopPropagation(); setSelectedTestId(test._id); }} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"><Edit size={16} /></button>
+
+                         <button onClick={(e) => { e.stopPropagation(); setSelectedTestId(test._id); }} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title="Edit Questions"><Edit size={16} /></button>
                       </div>
                    </div>
                 </div>
@@ -397,6 +416,7 @@ export default function MCQManager({ courseId, onBack }) {
          )}
       </div>
 
+      {/* CREATE MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
            <div className="bg-[#111] border border-white/10 w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl">
@@ -409,16 +429,23 @@ export default function MCQManager({ courseId, onBack }) {
                     <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Exam Title</label>
                     <input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white focus:border-yellow-500 outline-none" placeholder="Enter exam title..."/>
                  </div>
+                 
                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Scheduled Date</label>
-                        <input type="date" required value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">
+                            Scheduled Date {formData.isManualStart ? "" : "*"}
+                        </label>
+                        {/* 🛠️ BUG FIX: Conditional Required based on Manual Start */}
+                        <input type="date" required={!formData.isManualStart} value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500 disabled:opacity-30" disabled={formData.isManualStart}/>
                     </div>
                     <div>
-                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Scheduled Time</label>
-                        <input type="time" required value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">
+                            Scheduled Time {formData.isManualStart ? "" : "*"}
+                        </label>
+                        <input type="time" required={!formData.isManualStart} value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500 disabled:opacity-30" disabled={formData.isManualStart}/>
                     </div>
                  </div>
+
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 block">Duration (Mins)</label>
@@ -433,15 +460,17 @@ export default function MCQManager({ courseId, onBack }) {
                         <input type="number" min="1" required value={formData.totalMarks} onChange={e => setFormData({...formData, totalMarks: e.target.value})} className="w-full bg-black border border-white/10 rounded-lg p-3 text-white outline-none focus:border-yellow-500"/>
                     </div>
                  </div>
+
                  <div className="flex items-center gap-3 p-3 bg-yellow-900/10 border border-yellow-500/20 rounded-lg cursor-pointer hover:bg-yellow-900/20 transition-colors" onClick={() => setFormData({...formData, isManualStart: !formData.isManualStart})}>
                     <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${formData.isManualStart ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500 bg-black'}`}>
                         {formData.isManualStart && <CheckSquare size={14} className="text-black"/>}
                     </div>
                     <div>
                         <p className="text-sm font-bold text-yellow-100">Manual Start Mode</p>
-                        <p className="text-[10px] text-gray-500 mt-0.5">Start the exam manually regardless of scheduled time.</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">Start exam manually. Date & Time will be optional.</p>
                     </div>
                  </div>
+
                  <button type="submit" disabled={isSubmitting} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3.5 rounded-xl mt-2 flex justify-center items-center gap-2 transition-colors active:scale-[0.98]">
                     {isSubmitting ? <Loader2 className="animate-spin" size={20}/> : "Create & Start Editing"}
                  </button>
@@ -449,7 +478,94 @@ export default function MCQManager({ courseId, onBack }) {
            </div>
         </div>
       )}
-      {/*... Modal code waisa hi rahega ...*/}
+
+      {/* DOWNLOAD MODAL */}
+      {downloadModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+            <div className="bg-[#0a0a0a] w-full max-w-md rounded-3xl border border-yellow-500/30 overflow-hidden relative">
+                <div className="p-8 text-center">
+                    <button onClick={() => setDownloadModalOpen(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
+                    <div className="w-20 h-20 bg-yellow-500/5 rounded-full flex items-center justify-center mx-auto mb-6 text-yellow-400 border border-yellow-500/20">
+                        <Download size={36} />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-2">Download Paper</h2>
+                    <p className="text-gray-400 text-sm mb-8">Select format for <span className="text-yellow-400 font-bold">{selectedTestForDownload?.title}</span></p>
+                    <div className="space-y-4">
+                        {/* 🛠️ BUG FIX: Robust PDF Generation Triggers */}
+                        <button onClick={() => generatePDF('question_paper')} disabled={isDownloading} className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-[#121212] hover:border-yellow-500 transition-all">
+                            <div className="w-12 h-12 rounded-xl bg-gray-900 text-gray-400 flex items-center justify-center"><FileText size={20}/></div>
+                            <div className="text-left flex-1"><p className="text-white font-bold">Question Paper</p><p className="text-[10px] text-gray-500">With Images</p></div>
+                            {isDownloading && <Loader2 className="animate-spin text-yellow-500"/>}
+                        </button>
+                        <button onClick={() => generatePDF('solution')} disabled={isDownloading} className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-[#121212] hover:border-green-500 transition-all">
+                            <div className="w-12 h-12 rounded-xl bg-gray-900 text-gray-400 flex items-center justify-center"><CheckCircle size={20}/></div>
+                            <div className="text-left flex-1"><p className="text-white font-bold">Solution Key</p><p className="text-[10px] text-gray-500">Answers & Logic</p></div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* PREVIEW MODAL */}
+      {previewModalOpen && selectedTestForPreview && (
+          <div className="fixed inset-0 z-[250] bg-black/95 flex flex-col animate-in fade-in items-center justify-center p-4">
+             <div className="w-full h-full max-w-7xl bg-[#050505] flex flex-col rounded-3xl overflow-hidden border border-yellow-500/20">
+                <div className="bg-[#0a0a0a] border-b border-white/10 p-5 flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center text-yellow-400">
+                           <MonitorPlay size={20} />
+                        </div>
+                        <div>
+                           <h2 className="text-white font-black text-xl">{selectedTestForPreview.title}</h2>
+                           <p className="text-gray-500 text-xs uppercase tracking-widest">{selectedTestForPreview.status}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                         <button onClick={() => handleDelete(selectedTestForPreview._id)} className="px-4 py-2 bg-red-500/10 text-red-500 font-bold text-xs rounded-lg border border-red-500/20">
+                            CANCEL EXAM
+                         </button>
+                         {selectedTestForPreview.status !== 'live' && (
+                            <button onClick={() => toggleStatus(selectedTestForPreview._id, 'live')} className="px-5 py-2 bg-yellow-500 text-black font-black text-xs rounded-lg shadow-[0_0_20px_rgba(234,179,8,0.3)]">
+                                LAUNCH NOW
+                            </button>
+                         )}
+                         <button onClick={() => setPreviewModalOpen(false)} className="p-2 text-gray-500 hover:text-white"><X size={20}/></button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 md:p-10">
+                    <div className="max-w-4xl mx-auto space-y-8">
+                        {selectedTestForPreview.questions?.map((q, idx) => (
+                            <div key={idx} className="bg-[#0a0a0a] border border-white/5 rounded-3xl p-8">
+                                <div className="flex gap-4 mb-6">
+                                    <span className="text-yellow-500 font-black text-xl">Q{idx + 1}.</span>
+                                    <h3 className="text-xl font-bold text-gray-100">{q.questionText}</h3>
+                                </div>
+                                {q.imageUrl && (
+                                    <div className="mb-6 rounded-xl overflow-hidden border border-white/10 inline-block">
+                                        <img src={q.imageUrl} alt="Question" className="max-h-[300px] object-contain"/>
+                                    </div>
+                                )}
+                                <div className="space-y-3 md:pl-10">
+                                    {q.options.map((opt, optIdx) => (
+                                        <div key={optIdx} className="p-4 rounded-xl border border-white/5 bg-[#121212] flex items-center gap-4">
+                                            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center text-xs font-bold text-gray-500 border border-white/10">
+                                                {String.fromCharCode(65+optIdx)}
+                                            </div>
+                                            <span className="text-gray-300">{opt}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+             </div>
+          </div>
+      )}
+
     </div>
   );
 }

@@ -14,23 +14,41 @@ export default function ExamPortalPage() {
   const [error, setError] = useState(null); 
   const [test, setTest] = useState(null);
   const [questions, setQuestions] = useState([]);
+  
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [answers, setAnswers] = useState({}); 
   const [markedForReview, setMarkedForReview] = useState({});
+  const [endTime, setEndTime] = useState(null); // 🛠️ FIX: Added EndTime for hack-proof timer
   const [timeLeft, setTimeLeft] = useState(0);
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
 
+  // 1. 🛠️ FIX: LOAD EVERYTHING FROM LOCAL STORAGE ON MOUNT
   useEffect(() => {
     if (testId) {
+        // Load Answers
         const savedAnswers = localStorage.getItem(`exam_${testId}_answers`);
         if (savedAnswers) {
             try { setAnswers(JSON.parse(savedAnswers)); } catch(e){}
         }
+        
+        // Load Current Question
+        const savedIndex = localStorage.getItem(`exam_${testId}_qIndex`);
+        if (savedIndex) {
+            try { setCurrentQIndex(parseInt(savedIndex)); } catch(e){}
+        }
+
+        // Load Review Marks
+        const savedReview = localStorage.getItem(`exam_${testId}_review`);
+        if (savedReview) {
+            try { setMarkedForReview(JSON.parse(savedReview)); } catch(e){}
+        }
     }
   }, [testId]);
 
+  // 2. 🛠️ FIX: HELPER FUNCTIONS TO SAVE STATE ON EVERY CLICK
   const handleAnswerSelect = (qIndex, optIndex) => {
     setAnswers(prev => {
         const newAnswers = { ...prev, [qIndex]: optIndex };
@@ -48,6 +66,33 @@ export default function ExamPortalPage() {
     });
   };
 
+  const changeQuestion = (idx) => {
+      setCurrentQIndex(idx);
+      localStorage.setItem(`exam_${testId}_qIndex`, idx.toString());
+  };
+
+  const toggleReview = (idx) => {
+      setMarkedForReview(prev => {
+          const newReview = { ...prev, [idx]: !prev[idx] };
+          localStorage.setItem(`exam_${testId}_review`, JSON.stringify(newReview));
+          return newReview;
+      });
+  };
+
+  // 3. 🛠️ FIX: RELOAD PROTECTION
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+        if (!loading && !error && !isSubmitting) {
+            e.preventDefault();
+            e.returnValue = "Exam is in progress! Are you sure you want to refresh? You might lose time.";
+            return e.returnValue;
+        }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [loading, error, isSubmitting]);
+
+  // --- ANTI-CHEAT VISIBILITY LISTENER ---
   useEffect(() => {
     if (loading || error) return; 
 
@@ -64,7 +109,6 @@ export default function ExamPortalPage() {
         }
     };
 
-    // --- ANTI-CHEAT KEYBOARD LISTENER ---
     const handleKeyDown = (e) => {
         if (e.key === 'PrintScreen') {
             try { navigator.clipboard.writeText(''); } catch(err) {}
@@ -73,11 +117,6 @@ export default function ExamPortalPage() {
         }
         if ((e.ctrlKey || e.metaKey) && ['p', 's', 'c'].includes(e.key.toLowerCase())) {
             toast.error("This action is not allowed during the exam!");
-            e.preventDefault();
-        }
-        if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
-            try { navigator.clipboard.writeText(''); } catch(err) {}
-            toast.error("Screenshots are strictly prohibited!");
             e.preventDefault();
         }
     };
@@ -101,6 +140,7 @@ export default function ExamPortalPage() {
     };
   }, [warnings, loading, error]);
 
+  // --- START EXAM & INITIALIZE TIMER ---
   useEffect(() => {
     const startExam = async () => {
       try {
@@ -127,8 +167,17 @@ export default function ExamPortalPage() {
 
         setTest(data.test);
         setQuestions(data.test.questions);
-        const durationSec = (data.test.duration || 60) * 60;
-        setTimeLeft(durationSec);
+        
+        // 4. 🛠️ FIX: ABSOLUTE TIME TRACKING
+        const durationMs = (data.test.duration || 60) * 60 * 1000;
+        let savedEndTime = localStorage.getItem(`exam_${testId}_endTime`);
+        
+        if (!savedEndTime) {
+            // Agar pehli baar start kar raha hai toh end time set karo
+            savedEndTime = Date.now() + durationMs;
+            localStorage.setItem(`exam_${testId}_endTime`, savedEndTime.toString());
+        }
+        setEndTime(parseInt(savedEndTime));
         setLoading(false);
 
       } catch (error) {
@@ -140,23 +189,30 @@ export default function ExamPortalPage() {
     if (testId) startExam();
   }, [testId, router]);
 
+  // 5. 🛠️ FIX: ROBUST INTERVAL TIMER
   useEffect(() => {
-    if (!loading && !error && timeLeft > 0) {
-      const timer = setInterval(() => {
-        setTimeLeft((prev) => {
-           if(prev <= 1) {
-               clearInterval(timer);
-               handleSubmit(true);
-               return 0;
-           }
-           return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(timer);
+    if (!loading && !error && endTime) {
+      const updateTimer = () => {
+          const now = Date.now();
+          const remainingMs = endTime - now;
+          
+          if (remainingMs <= 1000) {
+              setTimeLeft(0);
+              clearInterval(timerInterval);
+              handleSubmit(true); // Auto Submit when 0
+          } else {
+              setTimeLeft(Math.floor(remainingMs / 1000));
+          }
+      };
+
+      updateTimer(); // Call immediately
+      const timerInterval = setInterval(updateTimer, 1000);
+      return () => clearInterval(timerInterval);
     }
-  }, [loading, error, timeLeft]);
+  }, [loading, error, endTime]);
 
   const formatTime = (seconds) => {
+    if (seconds < 0) seconds = 0;
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
@@ -165,21 +221,28 @@ export default function ExamPortalPage() {
 
   const handleSubmit = async (auto = false) => {
       if(isSubmitting) return; 
-      if(!auto && !confirm("Are you sure you want to submit?")) return;
+      if(!auto && !confirm("Are you sure you want to submit? You cannot change answers after this.")) return;
       
       setIsSubmitting(true);
       const loadingToast = toast.loading("Submitting your exam...");
 
       try {
           const answersArray = questions.map((_, idx) => answers[idx] !== undefined ? answers[idx] : -1);
+          const timeTakenSeconds = (test.duration * 60) - timeLeft;
+
           const res = await fetch(`/api/exam/${testId}/submit`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ answers: answersArray, timeTaken: (test.duration * 60) - timeLeft })
+              body: JSON.stringify({ answers: answersArray, timeTaken: timeTakenSeconds })
           });
           
           if(res.ok) {
+              // 6. 🛠️ FIX: CLEANUP LOCAL STORAGE AFTER SUBMIT
               localStorage.removeItem(`exam_${testId}_answers`);
+              localStorage.removeItem(`exam_${testId}_qIndex`);
+              localStorage.removeItem(`exam_${testId}_review`);
+              localStorage.removeItem(`exam_${testId}_endTime`);
+
               toast.dismiss(loadingToast);
               toast.success("Exam Submitted Successfully!");
               router.replace(`/dashboard/classroom/${test.courseId}/tests/${testId}/result`);
@@ -223,7 +286,6 @@ export default function ExamPortalPage() {
 
   const currentQ = questions[currentQIndex];
 
-  // --- 🛠️ FIX: SAFETY CHECK ADDED HERE ---
   if (!currentQ) {
       return (
           <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 text-center">
@@ -346,7 +408,7 @@ export default function ExamPortalPage() {
                     
                     {/* Left: Tools */}
                     <div className="flex items-center gap-2 md:gap-4">
-                        <button onClick={() => setMarkedForReview(prev => ({...prev, [currentQIndex]: !prev[currentQIndex]}))} 
+                        <button onClick={() => toggleReview(currentQIndex)} 
                             className={`p-3 md:px-5 md:py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2
                             ${markedForReview[currentQIndex] ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50' : 'bg-white/5 text-gray-400'}`}>
                             <Flag size={18} fill={markedForReview[currentQIndex] ? "currentColor" : "none"}/>
@@ -360,7 +422,7 @@ export default function ExamPortalPage() {
 
                     {/* Right: Navigation */}
                     <div className="flex items-center gap-3 md:gap-4">
-                        <button disabled={currentQIndex === 0} onClick={() => setCurrentQIndex(prev => prev - 1)} 
+                        <button disabled={currentQIndex === 0} onClick={() => changeQuestion(currentQIndex - 1)} 
                             className="px-4 py-2.5 md:px-6 md:py-3 rounded-xl bg-white/5 active:bg-white/10 text-white font-bold disabled:opacity-20 disabled:cursor-not-allowed transition-all text-sm md:text-base">
                             <span className="md:hidden"><ChevronLeft size={20}/></span>
                             <span className="hidden md:inline">Previous</span>
@@ -372,7 +434,7 @@ export default function ExamPortalPage() {
                                 {isSubmitting ? 'Submitting...' : 'SUBMIT'} {!isSubmitting && <CheckCircle size={16} className="md:w-5 md:h-5"/>}
                              </button>
                         ) : (
-                            <button onClick={() => setCurrentQIndex(prev => prev + 1)} 
+                            <button onClick={() => changeQuestion(currentQIndex + 1)} 
                                 className="px-5 py-2.5 md:px-10 md:py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:scale-105 active:scale-95 text-white font-black shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all flex items-center gap-2 text-sm md:text-base">
                                 <span className="hidden md:inline">Next</span> <ChevronRight size={20} strokeWidth={3}/>
                             </button>
@@ -396,7 +458,7 @@ export default function ExamPortalPage() {
                             const isMarked = markedForReview[idx];
                             
                             return (
-                                <button key={idx} onClick={() => { setCurrentQIndex(idx); setIsSidebarOpen(false); }} 
+                                <button key={idx} onClick={() => { changeQuestion(idx); setIsSidebarOpen(false); }} 
                                     className={`aspect-square rounded-lg md:rounded-xl flex items-center justify-center font-bold text-xs md:text-sm border transition-all relative overflow-hidden
                                     ${isCurr ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.6)] scale-110 z-10' : 
                                       isMarked ? 'bg-purple-900/40 text-purple-300 border-purple-500/50' : 
