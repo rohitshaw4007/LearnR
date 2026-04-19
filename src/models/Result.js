@@ -8,16 +8,29 @@ const ResultSchema = new mongoose.Schema({
   answers: { type: [Number], default: [] }, 
   score: { type: Number, default: 0 },
   totalMarks: { type: Number, required: true },
+  
   correctCount: { type: Number, default: 0 },
   wrongCount: { type: Number, default: 0 },
+  
   timeTaken: { type: Number, default: 0 }, 
   
-  // FIX: Added 'in-progress' state aur startedAt field time limit enforce karne ke liye
-  status: { type: String, enum: ['in-progress', 'completed', 'auto-submitted'], default: 'in-progress' },
+  // 🛠️ BUG FIX: 'in-progress' ko enum me define kiya gaya hai
+  status: { 
+    type: String, 
+    enum: ['in-progress', 'completed', 'auto-submitted'], 
+    default: 'in-progress' 
+  },
+  
   startedAt: { type: Date, default: Date.now }, 
   createdAt: { type: Date, default: Date.now }
 });
 
+// Unique Constraint
 ResultSchema.index({ testId: 1, studentId: 1 }, { unique: true });
 
-export default mongoose.models.Result || mongoose.model("Result", ResultSchema);
+// 🛠️ NEXT.JS CACHE FIX: Agar purana model load hai toh usko hatao taaki naya enum apply ho
+if (mongoose.models.Result) {
+  delete mongoose.models.Result;
+}
+
+export default mongoose.model("Result", ResultSchema);

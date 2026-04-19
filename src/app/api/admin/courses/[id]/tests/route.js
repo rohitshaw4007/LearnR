@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Test from "@/models/Test";
 
-// 🚨 STRICT NO-CACHE DIRECTIVES 🚨
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
@@ -23,8 +22,6 @@ export async function GET(req, { params }) {
     const now = new Date();
     let updatesMade = false;
 
-    console.log(`🔍 [ADMIN CHECK] Checking ${tests.length} tests for validity updates...`);
-
     const updatedTestsPromise = tests.map(async (test) => {
         const startTime = new Date(test.scheduledAt);
         const validityHours = test.validityHours || 24;
@@ -33,9 +30,12 @@ export async function GET(req, { params }) {
         
         let needsSave = false;
 
+        // 🛠️ BUG FIX: Admin UI me bhi isManualStart ka check zaroori hai
         if (test.status === 'scheduled' && now >= startTime && now < endTime) {
-            test.status = 'live';
-            needsSave = true;
+            if (!test.isManualStart) { 
+                test.status = 'live';
+                needsSave = true;
+            }
         }
 
         if ((test.status === 'live' || test.status === 'scheduled') && now >= endTime) {
@@ -63,12 +63,19 @@ export async function POST(req, { params }) {
     const { id } = await params;
     const body = await req.json();
 
-    const scheduledAt = new Date(`${body.scheduledDate}T${body.scheduledTime}`);
+    // 🛠️ BUG FIX: Frontend ISO string bhejna use karega seedha
+    let finalScheduledAt;
+    if (body.scheduledAt) {
+        finalScheduledAt = new Date(body.scheduledAt);
+    } else {
+        // Fallback agar koi purana request aaye
+        finalScheduledAt = new Date(`${body.scheduledDate}T${body.scheduledTime}`);
+    }
 
     const newTest = await Test.create({
       ...body,
       courseId: id,
-      scheduledAt: scheduledAt,
+      scheduledAt: finalScheduledAt,
       questions: [],
       status: 'scheduled'
     });
