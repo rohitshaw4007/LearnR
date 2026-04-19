@@ -10,28 +10,29 @@ export const revalidate = 0;
 export async function GET(req, { params }) {
   try {
     await connectDB();
-    const { id } = await params; // id here is testId
+    const { id } = await params; 
     const userId = await getDataFromToken(req);
 
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const result = await Result.findOne({ testId: id, studentId: userId });
     if (!result) return NextResponse.json({ error: "Result not found" }, { status: 404 });
+    
+    // FIX: Agar test abhi in-progress hai toh answer leak mat hone do
+    if (result.status === 'in-progress') {
+        return NextResponse.json({ error: "Exam is not submitted yet." }, { status: 400 });
+    }
 
     const test = await Test.findById(id);
     if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
-    // --- LEAKAGE PROTECTION LOGIC (BUG FIXED) ---
-    // Check if exam is still active based on Time AND Status
     const startTime = new Date(test.scheduledAt).getTime();
-    const validityHours = Number(test.validityHours) || 24; // Added Number() for safety
+    const validityHours = Number(test.validityHours) || 24; 
     const endTime = startTime + (validityHours * 60 * 60 * 1000);
     const currentTime = Date.now();
 
-    // Exam active tabhi manenge jab time bacha ho AUR test ka status 'completed' na ho
     const isExamActive = (currentTime < endTime) && (test.status !== 'completed');
 
-    // Agar exam abhi bhi chal raha hai, toh sirf status bhejo, answers nahi
     if (isExamActive) {
         return NextResponse.json({
             success: true,
@@ -39,12 +40,11 @@ export async function GET(req, { params }) {
                 testTitle: test.title,
                 studentId: userId,
                 isExamActive: true,
-                availableAt: new Date(endTime).toISOString(), // Time when result will be visible
+                availableAt: new Date(endTime).toISOString(), 
             }
         });
     }
 
-    // --- FULL RESULT GENERATION (Exam Ended) ---
     const mappedQuestions = test.questions.map((q, index) => {
       return {
         questionText: q.questionText,
@@ -62,17 +62,17 @@ export async function GET(req, { params }) {
       data: {
         testTitle: test.title,
         studentId: userId,
-        isExamActive: false, // Ab false jayega aur paper dikhega
+        isExamActive: false, 
         totalMarks: test.totalMarks,
         obtainedMarks: result.score,
         correctCount: result.correctCount, 
         wrongCount: result.wrongCount,     
         submittedAt: result.createdAt,
+        timeTaken: result.timeTaken, // Yahan frontend ko actual time pass hoga ab
         questions: mappedQuestions
       }
     });
   } catch (error) {
-    console.error("Result API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

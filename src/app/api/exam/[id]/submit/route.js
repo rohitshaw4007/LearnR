@@ -6,7 +6,6 @@ import User from "@/models/User";
 import { getDataFromToken } from "@/lib/getDataFromToken";
 import nodemailer from "nodemailer"; 
 
-// 🚨 STRICT NO-CACHE DIRECTIVES 🚨
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
@@ -15,39 +14,50 @@ export async function POST(req, { params }) {
   try {
     await connectDB();
     const { id } = await params;
-    const { answers, timeTaken } = await req.json(); 
+    const { answers } = await req.json(); // Frontend timeTaken ignore kar diya
 
     const userId = await getDataFromToken(req);
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // Double Submission Check
-    const existingResult = await Result.findOne({ testId: id, studentId: userId });
-    if (existingResult) {
-        return NextResponse.json({ error: "Exam already submitted" }, { status: 400 });
-    }
-
     const test = await Test.findById(id);
     if (!test) return NextResponse.json({ error: "Test not found" }, { status: 404 });
 
-    // --- TIME VALIDATION (ValidityHours se) ---
-    const startTime = new Date(test.scheduledAt).getTime();
-    const validityHours = test.validityHours || 24; 
-    const validityMs = validityHours * 60 * 60 * 1000;
+    // Fetch the in-progress session
+    const existingResult = await Result.findOne({ testId: id, studentId: userId });
     
-    const endTime = startTime + validityMs; 
+    if (!existingResult) {
+        return NextResponse.json({ error: "Exam session not found. Please start the exam properly." }, { status: 400 });
+    }
+    if (existingResult.status === 'completed' || existingResult.status === 'auto-submitted') {
+        return NextResponse.json({ error: "Exam already submitted." }, { status: 400 });
+    }
+
+    // --- TIME VALIDATION (Server Side Tracking) ---
     const currentTime = Date.now();
-    const bufferTime = 5 * 60 * 1000; 
+    const bufferTimeMs = 5 * 60 * 1000; // 5 min grace period slow internet ke liye
 
-    console.log(`[SUBMIT EXAM] Validity: ${validityHours} hrs, Expiry: ${new Date(endTime).toLocaleString()}`);
-
-    if (currentTime > (endTime + bufferTime)) {
+    // 1. Check Validity Window Expiry
+    const startTime = new Date(test.scheduledAt).getTime();
+    const validityMs = (test.validityHours || 24) * 60 * 60 * 1000;
+    const endTimeWindow = startTime + validityMs; 
+    
+    if (currentTime > (endTimeWindow + bufferTimeMs)) {
         return NextResponse.json({ 
             error: "The validity window for this exam is over. Submission not accepted." 
         }, { status: 400 });
     }
 
+    // 2. Strict Duration Check (Duration Hacker Block)
+    const startedAtTime = existingResult.startedAt.getTime();
+    const maxDurationMs = test.duration * 60 * 1000;
+    const exactTimeTakenSec = Math.floor((currentTime - startedAtTime) / 1000); // Server calculated time
+    
+    if (currentTime > (startedAtTime + maxDurationMs + bufferTimeMs)) {
+        return NextResponse.json({ error: "Exam time limit exceeded. Submission rejected." }, { status: 400 });
+    }
+
     // ==========================================
-    // 🛠️ SCORE CALCULATION LOGIC (NO NEGATIVE MARKING)
+    // SCORE CALCULATION 
     // ==========================================
     let score = 0;
     let correctCount = 0;
@@ -58,42 +68,34 @@ export async function POST(req, { params }) {
         const correctAns = q.correctOption;
         const questionMarks = parseFloat(q.marks) || 1; 
 
-        // Check if student attempted the question
         if (userAns !== undefined && userAns !== null && parseInt(userAns) !== -1) {
             const userAnsInt = parseInt(userAns);
             const correctAnsInt = parseInt(correctAns);
 
             if (!isNaN(correctAnsInt)) {
                 if (userAnsInt === correctAnsInt) {
-                    // Answer is CORRECT
                     score += questionMarks; 
                     correctCount++;
                 } else {
-                    // Answer is WRONG 
-                    // Yahan pehle "score -= 0.25;" tha jo maine hata diya hai. Ab koi negative mark nahi katega.
                     wrongCount++;
                 }
             }
         }
     });
 
-    // Score kabhi negative me na jaye isliye safety check
     if (score < 0) score = 0;
 
-    // 3. Save Result in Database
-    const newResult = await Result.create({
-        testId: id,
-        studentId: userId,
-        courseId: test.courseId,
-        score,
-        totalMarks: test.totalMarks,
-        answers, 
-        correctCount,
-        wrongCount,
-        timeTaken: timeTaken || 0,
-    });
+    // 3. Update result record database me save kardo
+    existingResult.answers = answers;
+    existingResult.score = score;
+    existingResult.correctCount = correctCount;
+    existingResult.wrongCount = wrongCount;
+    existingResult.timeTaken = exactTimeTakenSec; // Server side exact time!
+    existingResult.status = 'completed';
+    
+    await existingResult.save();
 
-    // --- 4. SEND SUCCESS MAIL ---
+    // 4. SEND SUCCESS MAIL
     try {
         const user = await User.findById(userId);
         if (user && user.email) {
@@ -112,20 +114,16 @@ export async function POST(req, { params }) {
                     <p>You have successfully submitted the exam: <strong>${test.title}</strong>.</p>
                     <p>Your Score: <strong>${score} / ${test.totalMarks}</strong></p>
                     <p>View your detailed result on the dashboard.</p>
-                    <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
-                    <p style="font-size: 12px; color: #888;">LearnR Examination System</p>
                   </div>
                 `,
             });
         }
-    } catch (mailError) {
-        // Mail error ko ignore karte hain taaki result save ho jaye
-    }
+    } catch (mailError) {}
 
     return NextResponse.json({ 
         success: true, 
         message: "Exam submitted successfully",
-        resultId: newResult._id,
+        resultId: existingResult._id,
         score 
     });
 
